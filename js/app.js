@@ -9,12 +9,21 @@ let currentCourse = null;
 let currentLessonId = null;
 
 async function init() {
-  // Load config
+  // Load config (config.local.json overrides config.json)
   try {
     const res = await fetch('config.json');
     appConfig = await res.json();
   } catch {
     appConfig = { provider: 'anthropic', apiKey: '', baseUrl: '', model: '' };
+  }
+  try {
+    const localRes = await fetch('config.local.json');
+    if (localRes.ok) {
+      const local = await localRes.json();
+      Object.assign(appConfig, local);
+    }
+  } catch {
+    // No local config, that's fine
   }
 
   // Load course manifest
