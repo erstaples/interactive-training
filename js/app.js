@@ -1,7 +1,7 @@
 import { getProgress, setLessonComplete, resetCourse } from './store.js';
 import { renderLessonContent, applyHighlighting, bindThreadToggles } from './renderer.js';
 import { renderQuiz, renderConfigEditor, bindExerciseHandlers } from './exercises.js';
-import { initWidget, setContext } from './ai-widget.js';
+import { initWidget, setContext, isConfigured, bindSectionAskButtons } from './ai-widget.js';
 
 let appConfig = null;
 let courses = [];
@@ -148,7 +148,7 @@ function renderLesson(lessonId) {
   const progress = getProgress(currentCourse.id);
 
   let html = `<h1>${lesson.title}</h1>`;
-  html += renderLessonContent(lesson, currentCourse.id);
+  html += renderLessonContent(lesson, currentCourse.id, isConfigured());
 
   // Exercises
   lesson.exercises.forEach((ex, i) => {
@@ -190,8 +190,9 @@ function renderLesson(lessonId) {
   };
   bindExerciseHandlers(lessonId, lesson.exercises, onExerciseComplete);
 
-  // Set AI widget context
+  // Set AI widget context and bind section ask buttons
   setContext(currentCourse, module, lesson);
+  bindSectionAskButtons(main);
 
   renderSidebar();
 }

@@ -4,74 +4,53 @@ let config = null;
 let currentCourse = null;
 let currentLesson = null;
 let currentModule = null;
-let activeThread = null;
 
 export async function initWidget(appConfig) {
   config = appConfig;
-
-  const toggle = document.getElementById('ai-toggle');
-  const panel = document.getElementById('ai-panel');
-  const close = document.getElementById('ai-close');
-  const send = document.getElementById('ai-send');
-  const input = document.getElementById('ai-input');
-
-  toggle.addEventListener('click', () => {
-    toggle.style.display = 'none';
-    panel.style.display = 'flex';
-    input.focus();
-  });
-
-  close.addEventListener('click', () => {
-    panel.style.display = 'none';
-    toggle.style.display = 'block';
-  });
-
-  send.addEventListener('click', () => handleSend());
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  });
 }
 
 export function setContext(course, module, lesson) {
   currentCourse = course;
   currentModule = module;
   currentLesson = lesson;
-  activeThread = null;
-
-  // Reset message display
-  const messages = document.getElementById('ai-messages');
-  messages.innerHTML = '';
-
-  // Hide panel, show toggle
-  document.getElementById('ai-panel').style.display = 'none';
-  document.getElementById('ai-toggle').style.display = 'block';
-
-  if (!config || !config.apiKey) {
-    document.getElementById('ai-widget').style.display = 'block';
-    messages.innerHTML = '<div class="ai-widget-setup">Configure your API key in config.json to enable AI assistance</div>';
-    document.getElementById('ai-send').disabled = true;
-    return;
-  }
-
-  document.getElementById('ai-widget').style.display = 'block';
-  document.getElementById('ai-send').disabled = false;
 }
 
-function getScrollAnchorHeading() {
-  const main = document.getElementById('main-content');
-  const headings = main.querySelectorAll('h2');
-  let closest = null;
-  const scrollTop = main.scrollTop;
+export function isConfigured() {
+  return config && config.apiKey;
+}
 
-  headings.forEach(h2 => {
-    if (h2.offsetTop <= scrollTop + 100) {
-      closest = h2.textContent.trim();
-    }
+export function bindSectionAskButtons(rootEl) {
+  rootEl.querySelectorAll('.section-ask-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const section = btn.closest('.section-ai-zone');
+      const panel = section.querySelector('.section-ai-panel');
+      if (panel.style.display === 'flex') {
+        panel.style.display = 'none';
+        btn.textContent = 'Ask about this section';
+      } else {
+        panel.style.display = 'flex';
+        btn.textContent = 'Hide assistant';
+        panel.querySelector('.section-ai-input').focus();
+      }
+    });
   });
-  return closest || (headings.length > 0 ? headings[0].textContent.trim() : 'General');
+
+  rootEl.querySelectorAll('.section-ai-send').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const zone = btn.closest('.section-ai-zone');
+      handleSectionSend(zone);
+    });
+  });
+
+  rootEl.querySelectorAll('.section-ai-input').forEach(input => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const zone = input.closest('.section-ai-zone');
+        handleSectionSend(zone);
+      }
+    });
+  });
 }
 
 function stripHtmlTags(html) {
@@ -80,12 +59,36 @@ function stripHtmlTags(html) {
   return tmp.textContent || tmp.innerText || '';
 }
 
-function buildSystemPrompt() {
+function getSectionContent(heading) {
+  const main = document.getElementById('main-content');
+  const headings = main.querySelectorAll('h2');
+  let collecting = false;
+  let sectionHtml = '';
+
+  for (const node of main.children) {
+    if (node.tagName === 'H2') {
+      if (node.textContent.trim() === heading) {
+        collecting = true;
+        sectionHtml += node.outerHTML;
+        continue;
+      } else if (collecting) {
+        break;
+      }
+    }
+    if (collecting) {
+      sectionHtml += node.outerHTML || node.textContent;
+    }
+  }
+  return stripHtmlTags(sectionHtml);
+}
+
+function buildSystemPrompt(sectionHeading) {
   const courseTitle = currentCourse.title;
   const moduleTitle = currentModule.title;
   const moduleNum = currentModule.number;
   const lessonTitle = currentLesson.title;
 
+  const sectionText = getSectionContent(sectionHeading);
   const lessonText = stripHtmlTags(currentLesson.content);
 
   const otherLessons = currentModule.lessons
@@ -93,17 +96,30 @@ function buildSystemPrompt() {
     .map(l => l.title)
     .join(', ');
 
-  return `You are a training assistant for the "${courseTitle}" course. The user is currently on lesson "${lessonTitle}" in Module ${moduleNum}: ${moduleTitle}. Answer questions about the lesson content and related topics. Be concise and practical.
+  return `You are a training assistant for the "${courseTitle}" course. The user is reading the section "${sectionHeading}" in lesson "${lessonTitle}" (Module ${moduleNum}: ${moduleTitle}). Answer questions about this section and related topics. Be concise and practical.
 
-## Current Lesson Content
+## Current Section: ${sectionHeading}
+${sectionText}
+
+## Full Lesson Context
 ${lessonText}
 
 ## Other Lessons in This Module
 Module also covers: ${otherLessons}`;
 }
 
-function renderMessages(messages) {
-  const container = document.getElementById('ai-messages');
+function escapeMinimal(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="ai-code-block"><code>$2</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+function renderPanelMessages(zone, messages) {
+  const container = zone.querySelector('.section-ai-messages');
   container.innerHTML = messages.map(m => {
     if (m.role === 'loading') {
       return '<div class="ai-msg loading">Thinking...</div>';
@@ -113,41 +129,32 @@ function renderMessages(messages) {
   container.scrollTop = container.scrollHeight;
 }
 
-function escapeMinimal(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>');
-}
-
-async function handleSend() {
-  const input = document.getElementById('ai-input');
+async function handleSectionSend(zone) {
+  const input = zone.querySelector('.section-ai-input');
   const question = input.value.trim();
   if (!question || !config || !config.apiKey) return;
 
+  const heading = zone.dataset.heading;
   input.value = '';
-  const anchorHeading = getScrollAnchorHeading();
 
-  if (!activeThread) {
-    activeThread = {
-      anchorHeading,
+  // Find or create thread for this zone
+  let thread = zone._activeThread;
+  if (!thread) {
+    thread = {
+      anchorHeading: heading,
       messages: [],
       timestamp: Date.now(),
       collapsed: true
     };
+    zone._activeThread = thread;
   }
 
-  activeThread.messages.push({ role: 'user', content: question });
-
-  // Show messages with loading indicator
-  const displayMessages = [...activeThread.messages, { role: 'loading' }];
-  renderMessages(displayMessages);
+  thread.messages.push({ role: 'user', content: question });
+  renderPanelMessages(zone, [...thread.messages, { role: 'loading' }]);
 
   try {
-    const systemPrompt = buildSystemPrompt();
-    const apiMessages = activeThread.messages.map(m => ({
+    const systemPrompt = buildSystemPrompt(heading);
+    const apiMessages = thread.messages.map(m => ({
       role: m.role,
       content: m.content
     }));
@@ -176,11 +183,51 @@ async function handleSend() {
     const data = await response.json();
     const assistantMsg = data.content[0].text;
 
-    activeThread.messages.push({ role: 'assistant', content: assistantMsg });
-    saveThread(currentCourse.id, currentLesson.id, activeThread);
-    renderMessages(activeThread.messages);
+    thread.messages.push({ role: 'assistant', content: assistantMsg });
+    saveThread(currentCourse.id, currentLesson.id, thread);
+    renderPanelMessages(zone, thread.messages);
+
+    // Update the embedded thread display above
+    updateEmbeddedThread(zone, thread);
   } catch (err) {
-    activeThread.messages.push({ role: 'assistant', content: `Error: ${err.message}` });
-    renderMessages(activeThread.messages);
+    thread.messages.push({ role: 'assistant', content: `Error: ${err.message}` });
+    renderPanelMessages(zone, thread.messages);
   }
+}
+
+function updateEmbeddedThread(zone, thread) {
+  // Find or create the embedded thread block above the ask button
+  const section = zone.closest('.section-ai-zone');
+  let threadContainer = section.querySelector('.section-embedded-threads');
+  if (!threadContainer) return;
+
+  // Re-render the threads for this section
+  const allThreads = getThreads(currentCourse.id, currentLesson.id)
+    .filter(t => t.anchorHeading === zone.dataset.heading);
+
+  threadContainer.innerHTML = allThreads.map(t => {
+    const firstQ = t.messages.find(m => m.role === 'user');
+    const preview = firstQ ? firstQ.content.substring(0, 100) + (firstQ.content.length > 100 ? '...' : '') : 'Q&A Thread';
+    const isActive = t.timestamp === thread.timestamp;
+
+    const msgHtml = t.messages.map(m =>
+      `<div class="embedded-thread-msg ${m.role}">${escapeMinimal(m.content)}</div>`
+    ).join('');
+
+    return `<div class="embedded-thread${isActive ? ' expanded' : ''}" data-timestamp="${t.timestamp}">
+      <div class="embedded-thread-toggle">${escapeHtml(preview)}</div>
+      <div class="embedded-thread-body">${msgHtml}</div>
+    </div>`;
+  }).join('');
+
+  // Rebind toggles
+  threadContainer.querySelectorAll('.embedded-thread-toggle').forEach(toggle => {
+    toggle.addEventListener('click', () => {
+      toggle.closest('.embedded-thread').classList.toggle('expanded');
+    });
+  });
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
