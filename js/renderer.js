@@ -38,7 +38,7 @@ function renderEmbeddedThreads(threads, heading) {
 
   return matching.map(thread => {
     const firstQuestion = thread.messages.find(m => m.role === 'user');
-    const preview = firstQuestion ? firstQuestion.content.substring(0, 100) + (firstQuestion.content.length > 100 ? '...' : '') : 'Q&A Thread';
+    const preview = thread.title || (firstQuestion ? firstQuestion.content.substring(0, 100) + (firstQuestion.content.length > 100 ? '...' : '') : 'Q&A Thread');
     const expanded = !thread.collapsed ? ' expanded' : '';
 
     const msgHtml = thread.messages.map(m =>

@@ -186,6 +186,12 @@ async function handleSectionSend(zone) {
     const assistantMsg = data.content[0].text;
 
     thread.messages.push({ role: 'assistant', content: assistantMsg });
+
+    // Generate a short title for the thread if it doesn't have one yet
+    if (!thread.title) {
+      thread.title = await generateThreadTitle(thread.messages);
+    }
+
     saveThread(currentCourse.id, currentLesson.id, thread);
     renderPanelMessages(zone, thread.messages);
 
@@ -194,6 +200,37 @@ async function handleSectionSend(zone) {
   } catch (err) {
     thread.messages.push({ role: 'assistant', content: `Error: ${err.message}` });
     renderPanelMessages(zone, thread.messages);
+  }
+}
+
+function fallbackPreview(thread) {
+  const firstQ = thread.messages.find(m => m.role === 'user');
+  return firstQ ? firstQ.content.substring(0, 100) + (firstQ.content.length > 100 ? '...' : '') : 'Q&A Thread';
+}
+
+async function generateThreadTitle(messages) {
+  try {
+    const qa = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+    const response = await fetch(`${config.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': config.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: config.model,
+        max_tokens: 30,
+        system: 'Generate a short title (5-8 words max) summarizing this Q&A exchange. Return ONLY the title, no quotes, no punctuation at the end.',
+        messages: [{ role: 'user', content: qa }]
+      })
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.content[0].text.trim();
+  } catch {
+    return null;
   }
 }
 
@@ -208,8 +245,7 @@ function updateEmbeddedThread(zone, thread) {
     .filter(t => t.anchorHeading === zone.dataset.heading);
 
   threadContainer.innerHTML = allThreads.map(t => {
-    const firstQ = t.messages.find(m => m.role === 'user');
-    const preview = firstQ ? firstQ.content.substring(0, 100) + (firstQ.content.length > 100 ? '...' : '') : 'Q&A Thread';
+    const preview = t.title || fallbackPreview(t);
     const isActive = t.timestamp === thread.timestamp;
 
     const msgHtml = t.messages.map(m =>
