@@ -222,7 +222,7 @@ async function generateThreadTitle(messages) {
       body: JSON.stringify({
         model: config.model,
         max_tokens: 30,
-        system: 'Generate a short title (5-8 words max) summarizing this Q&A exchange. Return ONLY the title, no quotes, no punctuation at the end.',
+        system: 'Generate a short title (80 characters max) summarizing this Q&A exchange. Return ONLY the title, no quotes, no punctuation at the end.',
         messages: [{ role: 'user', content: qa }]
       })
     });
