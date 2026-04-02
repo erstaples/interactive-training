@@ -1,5 +1,5 @@
 import { getProgress, setLessonComplete, resetCourse } from './store.js';
-import { renderLessonContent, applyHighlighting, bindThreadToggles } from './renderer.js';
+import { renderLessonContent, applyHighlighting } from './renderer.js';
 import { renderQuiz, renderConfigEditor, bindExerciseHandlers } from './exercises.js';
 import { initWidget, setContext, isConfigured, bindSectionAskButtons, bindThreadDeleteButtons } from './ai-widget.js';
 
@@ -169,7 +169,6 @@ function renderLesson(lessonId) {
 
   // Post-render setup
   applyHighlighting(main);
-  bindThreadToggles(main);
 
   // Bind mark-as-read
   const markBtn = main.querySelector('.mark-read-btn');
