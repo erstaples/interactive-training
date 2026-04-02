@@ -1,0 +1,372 @@
+{
+  "id": "squid-proxy",
+  "title": "Squid Proxy Configuration",
+  "description": "Domain-based HTTPS filtering with Squid forward proxy",
+  "modules": [
+    {
+      "id": "fundamentals",
+      "number": 1,
+      "title": "Fundamentals",
+      "lessons": [
+        {
+          "id": "what-is-squid",
+          "title": "What is Squid?",
+          "content": "<h2>A Proxy Server That's Been Around Forever</h2>\n<p>Squid is an open-source proxy server and web cache that has been in active development since the mid-1990s. It sits between clients (your browser, curl, pip, etc.) and the internet, mediating HTTP and HTTPS traffic. In a devcontainer context, Squid acts as an egress filter — controlling which external services your container can reach.</p>\n<p>There are three main types of proxy deployments, and understanding the differences is essential to working with Squid effectively.</p>\n\n<h2>Forward Proxy</h2>\n<p>A <strong>forward proxy</strong> is one where the client explicitly knows about the proxy and sends requests through it. This is typically configured via environment variables like <code>HTTP_PROXY</code> and <code>HTTPS_PROXY</code>, or through application-level settings. The proxy fetches resources on behalf of the client and returns the response.</p>\n<p>This is exactly what your devcontainer uses. Your container's environment variables point to <code>localhost:3128</code>, telling every HTTP-aware tool to route traffic through Squid.</p>\n<div class=\"config-block\">http_port 3128</div>\n\n<h2>Reverse Proxy</h2>\n<p>A <strong>reverse proxy</strong> sits in front of one or more backend servers. Clients connect to the proxy without knowing it exists — they think they're talking directly to the server. Reverse proxies are used for load balancing, caching, TLS termination, and shielding backend infrastructure. Nginx and Envoy are more common choices here, but Squid can do it too.</p>\n\n<h2>Transparent Proxy</h2>\n<p>A <strong>transparent proxy</strong> intercepts traffic at the network level using firewall rules (e.g., <code>iptables</code> redirect). The client doesn't configure anything and doesn't know a proxy exists. Squid supports transparent mode, but it's significantly more complex to set up — especially for HTTPS, where you need to deal with TLS interception and certificate injection.</p>\n<p>For devcontainer egress filtering, the forward proxy approach is simpler, more reliable, and doesn't require root-level network manipulation.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "Which proxy type does a typical devcontainer egress filter use, where HTTP_PROXY and HTTPS_PROXY environment variables point to localhost:3128?",
+              "options": [
+                "Forward proxy",
+                "Reverse proxy",
+                "Transparent proxy",
+                "None — the traffic is intercepted by iptables"
+              ],
+              "correct": 0,
+              "explanation": "A forward proxy is explicitly configured via environment variables. The client knows about the proxy and sends requests to it. This is different from a transparent proxy where iptables would redirect traffic without the client's knowledge."
+            }
+          ]
+        },
+        {
+          "id": "connect-tunnels",
+          "title": "How a CONNECT Tunnel Works",
+          "content": "<h2>The Problem: Proxying Encrypted Traffic</h2>\n<p>When a client makes a plain HTTP request through a forward proxy, the proxy can read the entire request — URL, headers, body — and forward it to the destination server. This works because HTTP is unencrypted.</p>\n<p>But HTTPS is encrypted. The proxy can't read the contents of a TLS connection, and it shouldn't be able to. So how does a forward proxy handle HTTPS? The answer is the <strong>CONNECT method</strong>.</p>\n\n<h2>The CONNECT Handshake</h2>\n<p>When a client needs to reach an HTTPS destination through a forward proxy, it sends a <code>CONNECT</code> request containing just the destination hostname and port:</p>\n<div class=\"config-block\">CONNECT api.anthropic.com:443 HTTP/1.1\nHost: api.anthropic.com:443</div>\n<p>The proxy looks at this request and decides whether to allow or deny it. If allowed, it responds with:</p>\n<div class=\"config-block\">HTTP/1.1 200 Connection established</div>\n<p>At this point, the proxy creates a <strong>TCP tunnel</strong> — it opens a TCP connection to the destination and then simply copies bytes in both directions between the client and the destination. The proxy can't participate in the TLS handshake (it doesn't have the destination's private key), so the simplest and only useful thing it can do is get out of the way. From the client's perspective, once the proxy says \"200 Connection established,\" it behaves as if it has a direct TCP connection to the destination. The TLS handshake and all subsequent encrypted traffic just flow through the pipe.</p>\n\n<h2>What the Proxy Can and Cannot See</h2>\n<p>This is critical for understanding Squid's filtering capabilities:</p>\n<ul>\n  <li><strong>The proxy CAN see:</strong> the destination hostname and port (from the CONNECT request)</li>\n  <li><strong>The proxy CANNOT see:</strong> the URL path, query parameters, request headers, request body, or response body</li>\n</ul>\n<p>This is why Squid's HTTPS filtering is limited to <strong>domain-level</strong> allow/deny decisions. You can allow <code>.github.com</code> but you can't allow only <code>github.com/my-org/*</code> — the path is invisible to the proxy once the tunnel is established.</p>\n<p>If you need path-level filtering for HTTPS, you'd have to use TLS interception (ssl-bump), which breaks the end-to-end encryption and introduces significant complexity.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "When a client sends HTTPS through a forward proxy using CONNECT, what can the proxy see?",
+              "options": [
+                "The full URL including path and query string",
+                "Only the destination hostname and port",
+                "The entire request and response body",
+                "Nothing — all traffic is encrypted"
+              ],
+              "correct": 1,
+              "explanation": "The CONNECT request contains only the hostname and port (e.g., api.anthropic.com:443). Once the tunnel is established, all subsequent traffic is encrypted end-to-end between client and server. The proxy just passes bytes through."
+            }
+          ]
+        },
+        {
+          "id": "squid-conf-anatomy",
+          "title": "Anatomy of squid.conf",
+          "content": "<h2>Three Building Blocks</h2>\n<p>Every <code>squid.conf</code> is built from three types of elements: <strong>directives</strong>, <strong>ACLs</strong>, and <strong>access rules</strong>. Once you understand these three pieces, you can read and write any Squid configuration.</p>\n\n<h2>Directives</h2>\n<p>Directives are key-value settings that control Squid's behavior. Each one appears on its own line. They configure things like which port to listen on, whether to cache content, and how to log requests.</p>\n<div class=\"config-block\">http_port 3128\ncache deny all\naccess_log daemon:/var/log/squid/access.log</div>\n\n<h2>ACLs (Access Control Lists)</h2>\n<p>ACLs are named conditions that match traffic. They don't allow or deny anything by themselves — they just define patterns to match against. The syntax is: <code>acl &lt;name&gt; &lt;type&gt; &lt;value&gt;</code>.</p>\n<p>Multiple <code>acl</code> lines with the <strong>same name</strong> are OR'd together — traffic matches if it hits any of them. Common ACL types include <code>dstdomain</code> (destination domain), <code>port</code>, <code>src</code> (source IP), and <code>method</code> (HTTP method).</p>\n<div class=\"config-block\">acl allowed_domains dstdomain .github.com\nacl allowed_domains dstdomain .pypi.org\nacl safe_ports port 80 443</div>\n\n<h2>Access Rules</h2>\n<p>Access rules combine ACLs to allow or deny traffic. They're processed <strong>top-to-bottom</strong>, and the <strong>first match wins</strong>. This means order is everything. Always end your rules with <code>http_access deny all</code> as a catch-all.</p>\n\n<h2>Putting It All Together</h2>\n<p>Here's a minimal but complete config showing all three elements working together:</p>\n<div class=\"config-block\"># Directive: listen on port 3128\nhttp_port 3128\n\n# ACLs: define what we want to match\nacl allowed_domains dstdomain .github.com\nacl allowed_domains dstdomain .pypi.org\n\n# Access rules: first match wins, top-to-bottom\nhttp_access allow CONNECT allowed_domains\nhttp_access allow allowed_domains\nhttp_access deny all</div>\n<p>Note that ACLs can be defined anywhere before they're used in an access rule. But the <strong>order of access rules is critical</strong> — if <code>deny all</code> comes before the allow rules, nothing gets through.</p>\n<p>Also note: lines starting with <code>#</code> are comments, and blank lines are ignored. Use both liberally to keep your config readable.</p>",
+          "exercises": [
+            {
+              "type": "config-editor",
+              "prompt": "The config below has its access rules in the wrong order. The intent is to allow traffic to allowed_domains and deny everything else, but it's currently blocking all traffic. Fix the ordering.",
+              "startingConfig": "# ACLs\nacl allowed_domains dstdomain .github.com\nacl allowed_domains dstdomain .pypi.org\n\n# Access rules (broken order)\nhttp_access deny all\nhttp_access allow CONNECT allowed_domains\nhttp_access allow allowed_domains",
+              "validators": [
+                {
+                  "regex": "http_access\\s+allow.*allowed_domains[\\s\\S]*http_access\\s+deny\\s+all",
+                  "flags": "m",
+                  "message": "Access rules must be ordered correctly",
+                  "hint": "The 'deny all' rule must come AFTER the allow rules. Squid processes rules top-to-bottom and stops at the first match."
+                }
+              ],
+              "solution": "# ACLs\nacl allowed_domains dstdomain .github.com\nacl allowed_domains dstdomain .pypi.org\n\n# Access rules (correct order)\nhttp_access allow CONNECT allowed_domains\nhttp_access allow allowed_domains\nhttp_access deny all",
+              "solutionNotes": "Squid processes access rules top-to-bottom and stops at the first match. If <code>deny all</code> comes first, it matches everything and no allow rules are ever reached. The correct order is: specific allows first, then the catch-all deny."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "your-config-explained",
+      "number": 2,
+      "title": "Your Config Explained",
+      "lessons": [
+        {
+          "id": "ports",
+          "title": "Ports",
+          "content": "<h2>Where Squid Listens</h2>\n<p>The first line in your config sets the stage for everything else:</p>\n<div class=\"config-block\">http_port 3128</div>\n<p>This tells Squid to listen on port 3128 for incoming client connections. Despite the directive being called <code>http_port</code>, it handles <strong>both</strong> regular HTTP requests and HTTPS <code>CONNECT</code> tunneling requests. The protocol is determined by the request method the client sends, not by the port itself.</p>\n\n<h2>Why Port 3128?</h2>\n<p>Port 3128 is the conventional default for Squid, much like 8080 is the convention for generic HTTP proxies or 80 for web servers. There's nothing magical about it — you could use any available port — but sticking with the convention means less surprise for anyone reading your config or debugging connectivity issues.</p>\n<p>Clients connect by setting environment variables that point to this port:</p>\n<div class=\"config-block\">HTTP_PROXY=http://localhost:3128\nHTTPS_PROXY=http://localhost:3128</div>\n<p>Note that even <code>HTTPS_PROXY</code> uses <code>http://</code> in the URL. The client speaks plain HTTP to the proxy (sending a CONNECT request), and the TLS connection happens through the tunnel to the final destination.</p>\n\n<h2>Other Port Configurations</h2>\n<p>Your setup uses a single port, which is typical for a devcontainer with one user. But Squid supports more complex setups:</p>\n<ul>\n  <li><strong>Multiple ports</strong> — you can define several <code>http_port</code> lines to listen on different ports with different policies</li>\n  <li><strong>Transparent mode</strong> — adding the <code>intercept</code> keyword (e.g., <code>http_port 3128 intercept</code>) tells Squid to expect traffic redirected by firewall rules rather than explicitly proxied traffic</li>\n  <li><strong>Binding to specific interfaces</strong> — <code>http_port 127.0.0.1:3128</code> restricts connections to localhost only</li>\n</ul>\n<p>For your devcontainer, the simple <code>http_port 3128</code> is exactly right — one port, one user, explicit proxy mode.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "What does `http_port 3128` actually listen for?",
+              "options": [
+                "Only HTTP requests",
+                "Only HTTPS CONNECT requests",
+                "Both HTTP requests and HTTPS CONNECT requests",
+                "Raw TCP connections on any protocol"
+              ],
+              "correct": 2,
+              "explanation": "Despite the name 'http_port', Squid accepts both regular HTTP requests and HTTPS CONNECT tunneling requests on this port. The protocol (HTTP vs CONNECT) is determined by the request method, not the port."
+            }
+          ]
+        },
+        {
+          "id": "acls",
+          "title": "ACLs",
+          "content": "<h2>Defining What to Match</h2>\n<p>ACLs are the building blocks of Squid's access control. Every ACL follows the same syntax:</p>\n<div class=\"config-block\">acl &lt;name&gt; &lt;type&gt; &lt;values...&gt;</div>\n<p>The <strong>name</strong> is whatever you choose (like <code>allowed_domains</code>), the <strong>type</strong> determines what aspect of the request to match, and the <strong>values</strong> are the patterns to match against.</p>\n\n<h2>Domain ACLs: The dstdomain Type</h2>\n<p>Your config uses <code>dstdomain</code> extensively to build a domain allowlist:</p>\n<div class=\"config-block\">acl allowed_domains dstdomain .nvidia.com\nacl allowed_domains dstdomain .anthropic.com\nacl allowed_domains dstdomain .github.com\n# ... many more domains ...\nacl allowed_domains dstdomain .taskfile.dev</div>\n<p>The leading dot in <code>.nvidia.com</code> is important — it means \"match nvidia.com itself <strong>and</strong> all subdomains.\" So <code>.nvidia.com</code> matches <code>nvidia.com</code>, <code>login.nvidia.com</code>, <code>api.nvidia.com</code>, and so on.</p>\n<p>Without the leading dot, <code>dstdomain nvidia.com</code> matches <em>only</em> <code>nvidia.com</code> — no subdomains. This is a subtle but common mistake: if you write <code>dstdomain github.com</code> instead of <code>.github.com</code>, requests to <code>api.github.com</code> will be denied.</p>\n<p>Multiple <code>acl</code> lines with the <strong>same name</strong> are OR'd together. If <em>any</em> line matches, the entire <code>allowed_domains</code> ACL matches. This is how the allowlist works — dozens of <code>acl allowed_domains dstdomain ...</code> lines, and a request to any one of those domains satisfies the ACL.</p>\n\n<h2>Port ACLs: Security Guards</h2>\n<p>Your config also defines port-based ACLs:</p>\n<div class=\"config-block\">acl SSL_ports port 443\nacl SSL_ports port 8443\nacl Safe_ports port 80\nacl Safe_ports port 443\nacl Safe_ports port 8443</div>\n<p><code>SSL_ports</code> restricts which ports CONNECT tunnels can target — you don't want someone tunneling to arbitrary ports. <code>Safe_ports</code> restricts which ports regular HTTP requests can target. These are security guards that prevent abuse of the proxy.</p>\n<p>However, defining these ACLs alone doesn't enforce anything — you also need access rules that use them. A hardened config would include:</p>\n<div class=\"config-block\">http_access deny !Safe_ports\nhttp_access deny CONNECT !SSL_ports</div>\n<p>The <code>!</code> operator means NOT, so these read as: \"deny requests to non-safe ports\" and \"deny CONNECT to non-SSL ports.\" Your devcontainer config defines these ACLs but doesn't add these deny rules, which is fine for a localhost-only proxy but worth adding in a shared deployment.</p>\n\n<h2>Other ACL Types</h2>\n<p>Squid supports many ACL types beyond <code>dstdomain</code> and <code>port</code>. A few worth knowing:</p>\n<ul>\n  <li><code>src</code> — match by source IP address (useful when the proxy serves multiple clients)</li>\n  <li><code>method</code> — match by HTTP method (GET, POST, CONNECT, etc.)</li>\n  <li><code>time</code> — match by day of week or time of day</li>\n  <li><code>url_regex</code> — match by URL pattern (only works for plain HTTP, not HTTPS)</li>\n</ul>",
+          "exercises": [
+            {
+              "type": "config-editor",
+              "prompt": "Add ACL rules to allow access to npm's registry. You need to allow both <code>registry.npmjs.org</code> and all subdomains of <code>npmjs.org</code>. Also allow <code>registry.yarnpkg.com</code>. Add these to the allowed_domains ACL.",
+              "startingConfig": "# Existing allowed domains\nacl allowed_domains dstdomain .nvidia.com\nacl allowed_domains dstdomain .github.com\n\n# Add npm/yarn registry domains below\n",
+              "validators": [
+                {
+                  "regex": "acl\\s+allowed_domains\\s+dstdomain\\s+\\.npmjs\\.org",
+                  "message": "Missing npmjs.org",
+                  "hint": "Add an ACL for .npmjs.org — the leading dot will match registry.npmjs.org and all other subdomains."
+                },
+                {
+                  "regex": "acl\\s+allowed_domains\\s+dstdomain\\s+\\.yarnpkg\\.com",
+                  "message": "Missing yarnpkg.com",
+                  "hint": "Add an ACL for .yarnpkg.com to allow registry.yarnpkg.com and any subdomains."
+                }
+              ],
+              "solution": "# Existing allowed domains\nacl allowed_domains dstdomain .nvidia.com\nacl allowed_domains dstdomain .github.com\n\n# Add npm/yarn registry domains below\nacl allowed_domains dstdomain .npmjs.org\nacl allowed_domains dstdomain .yarnpkg.com",
+              "solutionNotes": "Each <code>acl allowed_domains dstdomain .domain</code> line adds to the same <code>allowed_domains</code> ACL. The leading dot means 'this domain and all subdomains'. Multiple lines with the same ACL name are OR'd together — if any match, the ACL matches."
+            }
+          ]
+        },
+        {
+          "id": "access-rules",
+          "title": "Access Rules",
+          "content": "<h2>The Gatekeeper</h2>\n<p><code>http_access</code> is where allow/deny decisions actually happen. The syntax is:</p>\n<div class=\"config-block\">http_access allow|deny &lt;acl&gt; [&lt;acl&gt; ...]</div>\n<p>When multiple ACLs appear on a single line, they are <strong>AND'd</strong> together — all must match for the rule to apply. This is how your config combines method and destination checks:</p>\n<div class=\"config-block\">http_access allow CONNECT allowed_domains</div>\n<p>This means: \"allow if the method is CONNECT <strong>AND</strong> the destination is in <code>allowed_domains</code>.\" Both conditions must be true.</p>\n\n<h2>First-Match Semantics</h2>\n<p>Squid processes access rules <strong>top-to-bottom</strong> and stops at the first rule that matches. Once a match is found, no further rules are evaluated. This makes the order of your rules critical.</p>\n\n<h2>Your Access Rules Annotated</h2>\n<p>Here are the access rules from your config with explanations:</p>\n<div class=\"config-block\"># Rule 1: Allow HTTPS tunnels to allowed domains\nhttp_access allow CONNECT allowed_domains\n\n# Rule 2: Allow plain HTTP to allowed domains\nhttp_access allow allowed_domains\n\n# Rule 3: Block everything else\nhttp_access deny all</div>\n\n<h2>Why Both allow Rules?</h2>\n<p>You need <strong>both</strong> allow rules because they cover different traffic types:</p>\n<ul>\n  <li><strong>Rule 1</strong> handles HTTPS — when a client sends a <code>CONNECT</code> request to establish a TLS tunnel. Without this rule, all HTTPS traffic would be blocked.</li>\n  <li><strong>Rule 2</strong> handles plain HTTP — regular unencrypted requests. Without this rule, HTTP traffic to allowed domains would fall through to the deny rule.</li>\n</ul>\n<p>The built-in <code>CONNECT</code> ACL matches the HTTP method, so Rule 1 only fires for CONNECT requests. Rule 2 catches everything else going to allowed domains.</p>\n<p>You'll also see the <code>!</code> (NOT) operator in production configs — for example, <code>http_access deny !Safe_ports</code> means \"deny if the port is NOT in the Safe_ports ACL.\" This is common in Squid's default config and you'll encounter it immediately when reading configs in the wild.</p>\n\n<h2>The Catch-All Deny</h2>\n<p><code>http_access deny all</code> is the explicit catch-all at the bottom. The built-in <code>all</code> ACL matches every request. Without this line, Squid's default behavior depends on the <em>opposite</em> of the last rule's action — if the last rule is an allow, the default becomes deny, and vice versa. This implicit behavior is confusing and error-prone, so best practice is to always end with an explicit <code>deny all</code>.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "Given these rules:\n\n<div class=\"config-block\">http_access allow CONNECT allowed_domains\nhttp_access deny CONNECT all\nhttp_access allow allowed_domains\nhttp_access deny all</div>\n\nWhat happens when a client tries to CONNECT to evil.com:443?",
+              "options": [
+                "It's allowed by the first rule",
+                "It's denied by the second rule",
+                "It's denied by the fourth rule",
+                "It's allowed because CONNECT bypasses deny rules"
+              ],
+              "correct": 1,
+              "explanation": "Rule 1 checks: is this CONNECT AND allowed_domains? evil.com is not in allowed_domains, so no match. Rule 2 checks: is this CONNECT AND all? Yes — CONNECT to any destination matches. Denied. Rules 3 and 4 are never reached."
+            }
+          ]
+        },
+        {
+          "id": "dns-logging-misc",
+          "title": "DNS, Logging, and Misc",
+          "content": "<h2>DNS Configuration</h2>\n<div class=\"config-block\">dns_nameservers 10.255.255.254</div>\n<p>This overrides the system's default DNS resolver. In a container environment, <code>/etc/resolv.conf</code> might point somewhere unhelpful. The address <code>10.255.255.254</code> is the Docker Desktop DNS resolver (not to be confused with <code>127.0.0.11</code>, which is the standard Docker embedded DNS). The specific address depends on your Docker environment — if you're not using Docker Desktop, you may need a different value here.</p>\n\n<h2>Logging</h2>\n<div class=\"config-block\">access_log daemon:/var/log/squid/access.log squid\ncache_log /var/log/squid/cache.log</div>\n<p><strong>access_log</strong> records every request that passes through Squid. The <code>daemon:</code> prefix means logging is asynchronous — writes happen in a background helper process so they don't block request handling. The <code>squid</code> at the end is the log format name (Squid's native format). This is the log you'll check to see what traffic is being allowed or denied.</p>\n<p><strong>cache_log</strong> is Squid's operational log — startup messages, configuration errors, warnings, and runtime issues. When something goes wrong with Squid itself (not with a specific request), this is the first place to look.</p>\n\n<h2>Privacy Settings</h2>\n<div class=\"config-block\">forwarded_for delete\nvia off</div>\n<p><code>forwarded_for delete</code> strips the <code>X-Forwarded-For</code> header from outgoing requests. Proxies normally add this header to reveal the original client's IP to the destination server. Deleting it means destination servers won't see your internal IP address.</p>\n<p><code>via off</code> removes the <code>Via</code> header that advertises \"this request passed through a proxy.\" Together, these two directives make the proxy less visible to destination servers.</p>\n\n<h2>Operational Settings</h2>\n<div class=\"config-block\">visible_hostname localhost\nworkers 1\ncache deny all\nshutdown_lifetime 3 seconds</div>\n<p><code>visible_hostname localhost</code> sets the hostname Squid reports in error pages and HTTP headers. Without this, Squid tries to auto-detect the hostname, which can fail or produce noisy warnings in containers.</p>\n<p><code>workers 1</code> runs a single worker process. For a devcontainer with one user, this is all you need. More workers help when proxying for hundreds of concurrent users.</p>\n<p><code>cache deny all</code> disables caching entirely. Your proxy is purely a filter, not a cache. We'll cover what caching does and when you might want it in Module 3.</p>\n<p><code>shutdown_lifetime 3 seconds</code> controls how long Squid waits for active connections to finish during shutdown. The default is 30 seconds, but for a devcontainer you want fast restarts, so 3 seconds keeps things snappy.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "What does `forwarded_for delete` do?",
+              "options": [
+                "Deletes the proxy's forwarding configuration",
+                "Removes the X-Forwarded-For header from outgoing requests",
+                "Prevents DNS forwarding",
+                "Deletes the access log after forwarding"
+              ],
+              "correct": 1,
+              "explanation": "The <code>X-Forwarded-For</code> header is automatically added by proxies to reveal the original client IP. <code>forwarded_for delete</code> strips this header, so destination servers don't see your internal IP address."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "beyond-the-basics",
+      "number": 3,
+      "title": "Beyond the Basics",
+      "lessons": [
+        {
+          "id": "cache-config",
+          "title": "Cache Configuration",
+          "content": "<h2>Your Config: No Caching</h2>\n<p>Your devcontainer config includes <code>cache deny all</code>, which means Squid acts as a pure relay — it forwards requests and responses but never stores content locally. Every request goes to the origin server, every time. For a single-user devcontainer, this is a perfectly reasonable choice: it keeps things simple and avoids stale content issues.</p>\n<p>But caching is one of Squid's oldest and most powerful features, and there are scenarios where enabling it can make a real difference.</p>\n\n<h2>When Caching Helps</h2>\n<p>Think about a team of 20 developers all running <code>apt update && apt install -y build-essential</code> inside their devcontainers. Without caching, every single one of them downloads the same packages from the same mirrors. With a shared caching proxy, the first developer downloads the packages, and the other 19 get them from the local cache — faster and with less bandwidth.</p>\n<p>Common use cases: <strong>package repositories</strong> (apt, pip, npm, Maven), <strong>container base images</strong> fetched over HTTP, and any <strong>static assets</strong> fetched repeatedly. Anywhere you see the same large file downloaded multiple times, caching pays off.</p>\n\n<h2>Enabling Caching</h2>\n<p>To enable caching, you need to remove <code>cache deny all</code> and add a <code>cache_dir</code> directive:</p>\n<div class=\"config-block\">cache_dir ufs /var/spool/squid 100 16 256</div>\n<p>This creates a 100MB cache using the UFS storage scheme, with 16 level-1 directories and 256 level-2 directories. The directory structure helps filesystem performance when the cache holds thousands of objects.</p>\n\n<h2>Controlling Freshness</h2>\n<p><code>refresh_pattern</code> controls how long cached objects are considered fresh before Squid re-validates them with the origin:</p>\n<div class=\"config-block\">refresh_pattern [-i] regex min_age percent max_age</div>\n<p>For example: <code>refresh_pattern -i \\.deb$ 1440 100% 10080</code> caches .deb files for at least 1 day (1440 minutes) and at most 7 days (10080 minutes). The <code>-i</code> flag makes the regex case-insensitive.</p>\n<p><code>maximum_object_size</code> controls the largest file Squid will cache. The default is 4MB, which is too small for most packages — increase it if you're caching large files.</p>\n<p>After adding a <code>cache_dir</code>, you must run <code>squid -z</code> to initialize the cache directory structure before Squid will start. This only needs to happen once (or after changing the cache_dir path), but forgetting it is a common stumbling point — Squid will fail to start with an unhelpful error.</p>\n\n<h2>The HTTPS Caveat</h2>\n<p>Here's the important gotcha: <strong>HTTPS CONNECT tunnels cannot be cached</strong>. Squid can't see inside the encrypted tunnel, so it has nothing to cache. Caching only works for plain HTTP traffic, or if you enable SSL bumping (which is complex, invasive, and breaks certificate trust). In practice, most package managers can be configured to use HTTP mirrors if caching is a priority.</p>",
+          "exercises": [
+            {
+              "type": "config-editor",
+              "prompt": "Enable caching for a development team proxy. Configure a 500MB cache directory and add a refresh pattern that caches .deb and .rpm packages for at least 1 day (1440 minutes). Remove the 'cache deny all' line.",
+              "startingConfig": "# Current config (no caching)\ncache deny all\n\n# Add cache configuration below\n",
+              "validators": [
+                {
+                  "regex": "cache_dir",
+                  "message": "Missing cache_dir",
+                  "hint": "Add a cache_dir directive. Example: cache_dir ufs /var/spool/squid 500 16 256"
+                },
+                {
+                  "regex": "refresh_pattern.*\\.(deb|rpm)",
+                  "message": "Missing refresh_pattern for packages",
+                  "hint": "Add a refresh_pattern for .deb and/or .rpm files. Example: refresh_pattern -i \\.(deb|rpm)$ 1440 100% 10080"
+                },
+                {
+                  "regex": "^(?!.*cache\\s+deny\\s+all)",
+                  "flags": "s",
+                  "message": "Remove 'cache deny all'",
+                  "hint": "The 'cache deny all' line must be removed to enable caching."
+                }
+              ],
+              "solution": "# Cache configuration\ncache_dir ufs /var/spool/squid 500 16 256\nmaximum_object_size 100 MB\n\n# Cache .deb and .rpm packages for 1-7 days\nrefresh_pattern -i \\.(deb|rpm)$ 1440 100% 10080",
+              "solutionNotes": "<code>cache_dir ufs /var/spool/squid 500 16 256</code> creates a 500MB cache using the UFS storage scheme. <code>refresh_pattern</code> sets minimum freshness to 1440 minutes (1 day) and maximum to 10080 minutes (7 days). Note: only HTTP content can be cached — HTTPS CONNECT tunnels pass through without caching."
+            }
+          ]
+        },
+        {
+          "id": "authentication",
+          "title": "Authentication",
+          "content": "<h2>Beyond IP-Based Access Control</h2>\n<p>By default, Squid controls access based on ACLs like source IP, destination domain, port, and protocol. This works well when you can identify users by their network location — like your devcontainer, where the only client is <code>localhost</code>.</p>\n<p>But in shared environments — a team proxy, an office gateway, a VPN exit node — you may want to know <em>who</em> is making a request, not just <em>where</em> it came from. That's where authentication comes in.</p>\n\n<h2>Basic Authentication</h2>\n<p>The simplest setup uses an htpasswd-style file with usernames and hashed passwords:</p>\n<div class=\"config-block\">auth_param basic program /usr/lib/squid/basic_ncsa_auth /etc/squid/passwords\nauth_param basic realm Proxy Authentication Required</div>\n<p>The <code>auth_param</code> directive tells Squid which authentication scheme to use and which helper program to run. The helper (<code>basic_ncsa_auth</code>) reads credentials from <code>/etc/squid/passwords</code> — a file you create with <code>htpasswd</code>.</p>\n<p>Credentials are sent Base64-encoded (not encrypted). This is fine behind TLS or on localhost, but don't rely on it over an untrusted network without additional protection.</p>\n\n<h2>Using Auth in Access Rules</h2>\n<p>After configuring <code>auth_param</code>, you create an ACL that requires authentication and use it in your access rules:</p>\n<div class=\"config-block\">acl authenticated proxy_auth REQUIRED\nhttp_access allow authenticated allowed_domains\nhttp_access deny all</div>\n<p>The <code>proxy_auth REQUIRED</code> ACL matches any successfully authenticated user. You can also match specific usernames: <code>acl admins proxy_auth alice bob</code>.</p>\n\n<h2>Enterprise Options</h2>\n<p><strong>LDAP auth</strong> integrates with a corporate directory:</p>\n<div class=\"config-block\">auth_param basic program /usr/lib/squid/basic_ldap_auth \\\n  -b \"dc=example,dc=com\" -f \"uid=%s\" ldap.example.com</div>\n<p>For more sophisticated environments, Squid supports <code>auth_param negotiate</code> for Kerberos/SPNEGO (single sign-on) and <code>auth_param digest</code> for digest authentication (which avoids sending passwords in cleartext).</p>\n<p>Your devcontainer doesn't need any of this — it's a single user on localhost. But if you ever set up a shared proxy for a team, authentication is how you control and audit per-user access.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "Which directive tells Squid HOW to authenticate users (i.e., which backend to use)?",
+              "options": [
+                "http_access allow authenticated",
+                "acl authenticated proxy_auth REQUIRED",
+                "auth_param basic program /path/to/helper",
+                "authenticate_program /path/to/helper"
+              ],
+              "correct": 2,
+              "explanation": "<code>auth_param</code> configures the authentication scheme and helper program. The <code>acl</code> line creates a named condition that requires authentication. The <code>http_access</code> line uses that condition in access rules. All three work together, but <code>auth_param</code> is what sets up the authentication backend."
+            }
+          ]
+        },
+        {
+          "id": "delay-pools",
+          "title": "Delay Pools and Bandwidth Limiting",
+          "content": "<h2>Throttling Traffic</h2>\n<p>Delay pools let you throttle bandwidth for traffic matching specific ACLs. This is useful when you want to prevent one user, one domain, or one type of traffic from saturating your network link.</p>\n<p>A practical example: your team shares a proxy, and someone kicks off a massive <code>pip install</code> that downloads gigabytes of packages. Without throttling, everyone else's traffic slows to a crawl. With a delay pool on PyPI traffic, the download still works — it's just rate-limited so it doesn't hog all the bandwidth.</p>\n\n<h2>Pool Classes</h2>\n<p>Squid offers three classes of delay pools, each with increasing granularity:</p>\n<ul>\n  <li><strong>Class 1</strong> — a single aggregate bucket. One bandwidth limit applies to all matching traffic combined. Simple and effective.</li>\n  <li><strong>Class 2</strong> — aggregate + per-network bucket. Limits total bandwidth AND per /24 subnet. Useful when you have multiple subnets sharing one proxy.</li>\n  <li><strong>Class 3</strong> — aggregate + per-network + per-user bucket. The most granular option, giving you control at every level.</li>\n</ul>\n\n<h2>Configuration</h2>\n<p>Setting up a delay pool takes four steps:</p>\n<div class=\"config-block\"># 1. How many pools?\ndelay_pools 1\n\n# 2. What class is pool 1?\ndelay_class 1 1\n\n# 3. Set bandwidth (restore_rate/max_bucket_size in bytes/sec)\ndelay_parameters 1 64000/64000\n\n# 4. Which traffic does it apply to?\ndelay_access 1 allow big_downloads</div>\n\n<h2>The Token Bucket Model</h2>\n<p>The value format <code>restore_rate/max_bucket_size</code> uses a token bucket model. Think of <code>max_bucket_size</code> as how much traffic can burst (the bucket capacity), and <code>restore_rate</code> as how fast the bucket refills (sustained throughput in bytes per second).</p>\n<p>Setting both values equal (e.g., <code>524288/524288</code>) means a steady 512KB/s with no burst allowance. Setting a larger bucket (e.g., <code>524288/2097152</code>) allows an initial 2MB burst before settling to 512KB/s.</p>\n<p>Use <code>-1/-1</code> to mean unlimited — no throttling for that level of the pool hierarchy.</p>\n<p><strong>Important caveat:</strong> delay pools only work for plain HTTP traffic. HTTPS CONNECT tunnels are opaque byte streams — Squid can't meter what it can't see inside the tunnel. This is the same limitation as caching. If the traffic you want to throttle is HTTPS (which most traffic is today), delay pools won't help.</p>",
+          "exercises": [
+            {
+              "type": "config-editor",
+              "prompt": "Create a delay pool that limits bandwidth to pypi.org to 512KB/s (524288 bytes/sec). Use a class 1 pool (simple aggregate limit). You'll need to define the ACL, the pool count, class, parameters, and access rule.",
+              "startingConfig": "# Add bandwidth limiting for pypi.org\n\n# Step 1: Define an ACL for pypi.org\n\n# Step 2: Configure the delay pool\n\n# Step 3: Link the pool to the ACL\n",
+              "validators": [
+                {
+                  "regex": "acl\\s+\\S+\\s+dstdomain\\s+\\.?pypi\\.org",
+                  "message": "Missing ACL for pypi.org",
+                  "hint": "Define an ACL that matches pypi.org. Example: acl pypi_traffic dstdomain .pypi.org"
+                },
+                {
+                  "regex": "delay_pools\\s+1",
+                  "message": "Missing delay_pools directive",
+                  "hint": "Set the number of delay pools: delay_pools 1"
+                },
+                {
+                  "regex": "delay_class\\s+1\\s+1",
+                  "message": "Missing delay_class",
+                  "hint": "Set pool 1 to class 1 (aggregate only): delay_class 1 1"
+                },
+                {
+                  "regex": "delay_parameters\\s+1\\s+524288/524288",
+                  "message": "Incorrect delay_parameters",
+                  "hint": "Set pool 1 to 512KB/s: delay_parameters 1 524288/524288 (values are in bytes/sec)"
+                },
+                {
+                  "regex": "delay_access\\s+1\\s+allow",
+                  "message": "Missing delay_access",
+                  "hint": "Link the pool to your ACL: delay_access 1 allow <acl_name>"
+                }
+              ],
+              "solution": "# Bandwidth limiting for pypi.org\n\n# Step 1: Define an ACL for pypi.org\nacl pypi_traffic dstdomain .pypi.org\n\n# Step 2: Configure the delay pool\ndelay_pools 1\ndelay_class 1 1\ndelay_parameters 1 524288/524288\n\n# Step 3: Link the pool to the ACL\ndelay_access 1 allow pypi_traffic",
+              "solutionNotes": "<code>delay_pools 1</code> says we have one pool. <code>delay_class 1 1</code> makes pool 1 a class 1 (single aggregate bucket). <code>delay_parameters 1 524288/524288</code> sets both the refill rate and bucket size to 512KB/s. <code>delay_access 1 allow pypi_traffic</code> applies this pool to traffic matching the pypi_traffic ACL."
+            }
+          ]
+        },
+        {
+          "id": "debugging",
+          "title": "Debugging",
+          "content": "<h2>The Two Key Log Files</h2>\n<p>When something goes wrong with Squid — and it will — there are two log files you need to know about:</p>\n<ul>\n  <li><strong>access.log</strong> (<code>/var/log/squid/access.log</code>) — logs every request that passes through Squid. This is your primary tool for understanding what's being allowed, denied, cached, or failing.</li>\n  <li><strong>cache.log</strong> (<code>/var/log/squid/cache.log</code>) — logs Squid's operational messages: startup, shutdown, config errors, DNS issues, and warnings. Check this first when Squid won't start or behaves unexpectedly.</li>\n</ul>\n\n<h2>Reading access.log</h2>\n<p>Each line follows a standard format:</p>\n<div class=\"config-block\">timestamp elapsed client result_code/status size method URL peer mime_type</div>\n<p>For example:</p>\n<div class=\"config-block\">1711900000.123  200 127.0.0.1 TCP_TUNNEL/200 5432 CONNECT github.com:443 - HIER_DIRECT/github.com -</div>\n<p>The fields are: <strong>timestamp</strong> (Unix epoch), <strong>elapsed</strong> (request duration in milliseconds), <strong>client</strong> (source IP), <strong>result_code/status</strong>, <strong>size</strong> (bytes), <strong>method</strong>, <strong>URL</strong>, <strong>peer</strong> (upstream routing), and <strong>mime_type</strong>.</p>\n<p>The most important field is the <strong>result code</strong>. Here's what the common ones mean:</p>\n<ul>\n  <li><code>TCP_DENIED/403</code> — Squid blocked the request (ACL denied it)</li>\n  <li><code>TCP_TUNNEL/200</code> — successful CONNECT tunnel (HTTPS working as expected)</li>\n  <li><code>TCP_MISS/200</code> — HTTP request forwarded to origin (not cached)</li>\n  <li><code>TCP_HIT/200</code> — served from cache</li>\n  <li><code>TCP_MISS/503</code> — origin server unreachable (DNS failure, connection refused, etc.)</li>\n</ul>\n\n<h2>Useful Commands</h2>\n<p>These are the commands you'll reach for most often:</p>\n<div class=\"config-block\"># Validate config without restarting\nsquid -k parse\n\n# Reload config without restarting\nsquid -k reconfigure\n\n# Runtime stats\nsquidclient mgr:info\n\n# Watch requests in real time\ntail -f /var/log/squid/access.log</div>\n<p><code>squid -k parse</code> is especially valuable — run it every time you edit the config. It catches syntax errors, unknown directives, and deprecated options before they cause problems at runtime.</p>\n<p>When access.log and these commands aren't enough, you can increase Squid's internal verbosity with <code>debug_options</code>. For example, <code>debug_options ALL,1 28,9</code> sets general logging to level 1 but cranks ACL evaluation logging to level 9. This produces extremely verbose output in cache.log showing exactly which ACLs matched or didn't for each request — useful for debugging access rule issues, but too noisy for normal operation.</p>\n\n<h2>Debugging Workflow</h2>\n<p>When something isn't working, follow this sequence: <strong>1)</strong> Check <code>cache.log</code> for errors. <strong>2)</strong> Run <code>squid -k parse</code> to validate your config. <strong>3)</strong> Watch <code>access.log</code> while making test requests (e.g., <code>curl -x localhost:3128 https://example.com</code>). <strong>4)</strong> Look at the result codes — they almost always tell you exactly what happened.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You see this line in access.log:\n\n<code>1711900000.123 50 127.0.0.1 TCP_DENIED/403 3900 CONNECT evil.com:443 - HIER_NONE/- -</code>\n\nWhat happened?",
+              "options": [
+                "The client successfully connected to evil.com",
+                "Squid blocked the CONNECT request because evil.com is not in the allow list",
+                "The DNS lookup for evil.com failed",
+                "The connection to evil.com timed out after 50ms"
+              ],
+              "correct": 1,
+              "explanation": "<code>TCP_DENIED/403</code> means Squid's access rules denied the request. The <code>CONNECT evil.com:443</code> tells us it was an HTTPS tunnel attempt. The <code>403</code> status code was returned to the client. The <code>50</code> is the elapsed time in milliseconds, and <code>HIER_NONE/-</code> confirms no upstream connection was made."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "advanced-configurations",
+      "number": 4,
+      "title": "Advanced Configurations",
+      "lessons": [
+        {
+          "id": "ssl-bumping",
+          "title": "SSL Bumping (TLS Interception)",
+          "content": "<h2>Why SSL Bumping Exists</h2>\n<p>Throughout this guide, we've repeatedly hit the same limitation: Squid can't see inside HTTPS CONNECT tunnels. It can allow or deny by domain, but it can't inspect URL paths, filter content, cache responses, or apply delay pools to encrypted traffic. SSL bumping removes that limitation — at a significant cost.</p>\n\n<h2>How It Works</h2>\n<p>With SSL bumping enabled, Squid intercepts the TLS handshake instead of creating a blind tunnel. It presents its <strong>own</strong> TLS certificate to the client (signed by a local CA), then opens a <strong>separate</strong> TLS connection to the destination server. Squid decrypts traffic from the client, inspects it, and re-encrypts it to the destination.</p>\n<div class=\"config-block\"># Generate a CA certificate first:\n#   openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \\\n#     -keyout /etc/squid/bump.key -out /etc/squid/bump.crt\n\n# Enable SSL bumping\nhttp_port 3128 ssl-bump \\\n  cert=/etc/squid/bump.crt \\\n  key=/etc/squid/bump.key \\\n  generate-host-certificates=on \\\n  dynamic_cert_mem_cache_size=4MB\n\n# Decide what to bump vs. splice\nacl bump_targets dstdomain .example.com\nssl_bump bump bump_targets\nssl_bump splice all</div>\n\n<h2>Bump vs. Splice vs. Peek</h2>\n<p>SSL bumping isn't all-or-nothing. Squid gives you three actions per connection:</p>\n<ul>\n  <li><strong>bump</strong> — full interception. Squid terminates TLS, inspects the traffic, re-encrypts to the destination. You get full visibility (paths, headers, body) but break end-to-end encryption.</li>\n  <li><strong>splice</strong> — passthrough. Squid peeks at the SNI (Server Name Indication) in the client's TLS hello to learn the hostname, then creates a blind tunnel. No interception, no certificate replacement. Equivalent to a normal CONNECT tunnel.</li>\n  <li><strong>peek</strong> — inspect the TLS hello to extract the hostname, then decide whether to bump or splice. Often used as a first step before making the bump/splice decision.</li>\n</ul>\n<p>A common pattern is to peek at everything, bump specific domains that need inspection, and splice the rest:</p>\n<div class=\"config-block\">acl step1 at_step SslBump1\n\nssl_bump peek step1\nssl_bump bump internal_domains\nssl_bump splice all</div>\n\n<h2>The Trust Problem</h2>\n<p>For SSL bumping to work, every client must trust the proxy's CA certificate. Otherwise, clients see certificate errors for every HTTPS site. In a corporate environment, the CA cert is pushed via device management. In a devcontainer, you'd add it to the system trust store.</p>\n<p>This is the fundamental trade-off: you gain full visibility into HTTPS traffic, but you <strong>break the trust model</strong> that TLS provides. The proxy becomes a man-in-the-middle — by design. Some applications (certificate pinning, mutual TLS) will refuse to work through a bumping proxy.</p>\n\n<h2>When to Use It</h2>\n<p>SSL bumping is appropriate for:</p>\n<ul>\n  <li><strong>Content filtering</strong> — corporate proxies that need to scan for malware or enforce URL-path-level policies</li>\n  <li><strong>HTTPS caching</strong> — caching package downloads that are only available over HTTPS</li>\n  <li><strong>Debugging</strong> — inspecting HTTPS traffic during development (similar to mitmproxy or Charles Proxy)</li>\n</ul>\n<p>For your devcontainer's domain-based allowlisting, SSL bumping is overkill. CONNECT filtering gives you what you need without the complexity and trust issues.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "What is the key trade-off when enabling SSL bumping?",
+              "options": [
+                "It increases latency but has no security implications",
+                "It provides full HTTPS visibility but breaks end-to-end TLS trust",
+                "It only works with HTTP/1.1, not HTTP/2",
+                "It requires the destination server to support a special protocol"
+              ],
+              "correct": 1,
+              "explanation": "SSL bumping lets Squid decrypt and inspect HTTPS traffic, giving full visibility into paths, headers, and content. But it does this by terminating TLS at the proxy and re-encrypting — meaning the client is no longer directly verifying the destination server's certificate. Every client must trust the proxy's CA, and applications with certificate pinning may break."
+            }
+          ]
+        },
+        {
+          "id": "transparent-proxying",
+          "title": "Transparent Proxying",
+          "content": "<h2>Explicit vs. Transparent</h2>\n<p>Your devcontainer uses an <strong>explicit</strong> proxy — clients know about the proxy because <code>HTTP_PROXY</code> and <code>HTTPS_PROXY</code> are set. The client deliberately sends requests to <code>localhost:3128</code>.</p>\n<p>A <strong>transparent</strong> proxy intercepts traffic at the network level. Clients have no idea a proxy exists — they make requests normally, and firewall rules (iptables/nftables) silently redirect the traffic to Squid. No environment variables, no proxy configuration on the client.</p>\n\n<h2>Setting It Up</h2>\n<p>Two pieces are required: Squid must be told to expect intercepted traffic, and the firewall must redirect traffic to Squid.</p>\n<div class=\"config-block\"># Squid: listen in intercept mode\nhttp_port 3128 intercept</div>\n<p>The <code>intercept</code> keyword tells Squid that incoming connections on this port were redirected by the firewall, not explicitly proxied. Squid extracts the original destination from the packet metadata rather than expecting a proxy-style request.</p>\n<div class=\"config-block\"># iptables: redirect outbound HTTP to Squid\niptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 3128\n\n# For traffic from other hosts through this machine:\niptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3128</div>\n\n<h2>The HTTPS Problem</h2>\n<p>Transparent proxying works cleanly for HTTP — Squid can read the Host header and process the request normally. But HTTPS is a different story.</p>\n<p>When a client connects to <code>github.com:443</code> and iptables redirects it to Squid, the client begins a TLS handshake expecting to talk to GitHub. Squid can't respond to that handshake (it's not GitHub), so the connection fails.</p>\n<p>To handle HTTPS transparently, you need SSL bumping combined with intercept mode:</p>\n<div class=\"config-block\">https_port 3129 intercept ssl-bump \\\n  cert=/etc/squid/bump.crt \\\n  key=/etc/squid/bump.key</div>\n<p>This adds all the complexity and trust issues of SSL bumping on top of transparent proxying. It's why many setups — including your devcontainer — choose explicit proxying instead: it handles HTTPS cleanly via CONNECT without any TLS interception.</p>\n\n<h2>When Transparent Proxying Makes Sense</h2>\n<ul>\n  <li><strong>Network-wide filtering</strong> — a gateway proxy where you can't configure every client (IoT devices, guest networks)</li>\n  <li><strong>HTTP-only caching</strong> — accelerating HTTP package mirrors where clients can't be reconfigured</li>\n  <li><strong>Captive portals</strong> — redirecting unauthenticated users to a login page</li>\n</ul>\n<p>If you can configure the clients (like in a devcontainer), explicit proxying is almost always simpler and more capable.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "Why does transparent proxying struggle with HTTPS without SSL bumping?",
+              "options": [
+                "HTTPS traffic uses a different port that iptables can't redirect",
+                "The client starts a TLS handshake expecting the real server, but reaches Squid instead",
+                "Transparent mode doesn't support the CONNECT method",
+                "HTTPS requires the client to set HTTP_PROXY explicitly"
+              ],
+              "correct": 1,
+              "explanation": "When iptables redirects an HTTPS connection to Squid, the client thinks it's talking to the destination server and begins a TLS handshake. But Squid doesn't have the destination's certificate or private key, so it can't complete the handshake. Without SSL bumping (where Squid presents its own CA-signed certificate), the connection simply fails."
+            }
+          ]
+        },
+        {
+          "id": "cache-peer",
+          "title": "Proxy Chaining (cache_peer)",
+          "content": "<h2>What Is Proxy Chaining?</h2>\n<p>Sometimes your proxy needs to forward requests through <em>another</em> proxy rather than connecting directly to the destination. This is called proxy chaining, and Squid configures it with the <code>cache_peer</code> directive.</p>\n<p>Common scenarios:</p>\n<ul>\n  <li><strong>Corporate environments</strong> — your local Squid forwards through a corporate gateway proxy that handles authentication and logging</li>\n  <li><strong>Tiered caching</strong> — a local proxy checks its cache first, then forwards misses to a regional cache, which forwards to the origin</li>\n  <li><strong>Network segmentation</strong> — your proxy can't reach the internet directly but can reach an upstream proxy that can</li>\n</ul>\n\n<h2>Basic Configuration</h2>\n<div class=\"config-block\"># Forward all traffic through an upstream proxy\ncache_peer upstream-proxy.corp.com parent 3128 0 no-query default</div>\n<p>Breaking down the parameters:</p>\n<ul>\n  <li><code>upstream-proxy.corp.com</code> — hostname of the upstream proxy</li>\n  <li><code>parent</code> — relationship type. A <strong>parent</strong> proxy can fetch content from the origin on your behalf. (Other types: <code>sibling</code> for cache-only peers that won't fetch from origin, <code>multicast</code> for ICP groups.)</li>\n  <li><code>3128</code> — the HTTP port of the upstream proxy</li>\n  <li><code>0</code> — ICP port (0 disables ICP, an older cache coordination protocol you'll rarely need)</li>\n  <li><code>no-query</code> — don't send ICP queries to this peer</li>\n  <li><code>default</code> — use this peer as the default route</li>\n</ul>\n\n<h2>Selective Routing</h2>\n<p>You can route different traffic to different upstream proxies:</p>\n<div class=\"config-block\"># Internal sites go through the corporate proxy\ncache_peer corp-proxy.internal parent 3128 0 no-query\nacl internal_sites dstdomain .corp.com .internal\n\n# Everything else goes direct\ncache_peer_access corp-proxy.internal allow internal_sites\ncache_peer_access corp-proxy.internal deny all</div>\n<p><code>cache_peer_access</code> controls which requests are sent to which peer. Traffic that doesn't match any peer goes direct (unless you set <code>never_direct allow all</code>).</p>\n\n<h2>Forcing All Traffic Through a Peer</h2>\n<p>To prevent Squid from ever connecting directly to the internet:</p>\n<div class=\"config-block\">cache_peer upstream.proxy parent 3128 0 no-query default\nnever_direct allow all</div>\n<p><code>never_direct allow all</code> means Squid must always use a peer — if the peer is down, requests fail rather than going direct. This is important in environments where the proxy is the only authorized internet exit point.</p>\n\n<h2>Authentication to Upstream Proxies</h2>\n<p>If the upstream proxy requires credentials:</p>\n<div class=\"config-block\">cache_peer upstream.proxy parent 3128 0 no-query default \\\n  login=username:password</div>\n<p>The <code>login</code> option adds a <code>Proxy-Authorization</code> header to requests sent to this peer. For more sophisticated setups, <code>login=PASS</code> forwards the client's own credentials to the upstream proxy, and <code>login=NEGOTIATE</code> uses Kerberos.</p>",
+          "exercises": [
+            {
+              "type": "config-editor",
+              "prompt": "Configure Squid to forward all traffic through an upstream proxy at <code>gateway.corp.com:8080</code>. Make sure Squid never connects directly to the internet.",
+              "startingConfig": "# Configure proxy chaining\n\n# Step 1: Define the upstream proxy\n\n# Step 2: Prevent direct connections\n",
+              "validators": [
+                {
+                  "regex": "cache_peer\\s+gateway\\.corp\\.com\\s+parent\\s+8080",
+                  "message": "Missing or incorrect cache_peer",
+                  "hint": "Define the upstream proxy: cache_peer gateway.corp.com parent 8080 0 no-query default"
+                },
+                {
+                  "regex": "never_direct\\s+allow\\s+all",
+                  "message": "Missing never_direct",
+                  "hint": "Add \"never_direct allow all\" to prevent Squid from connecting directly to the internet."
+                }
+              ],
+              "solution": "# Configure proxy chaining\n\n# Step 1: Define the upstream proxy\ncache_peer gateway.corp.com parent 8080 0 no-query default\n\n# Step 2: Prevent direct connections\nnever_direct allow all",
+              "solutionNotes": "<code>cache_peer</code> defines gateway.corp.com as a parent proxy on port 8080. The <code>0</code> disables ICP, <code>no-query</code> skips ICP queries, and <code>default</code> makes it the default route. <code>never_direct allow all</code> ensures Squid always uses the peer — requests fail if the peer is unreachable rather than going direct."
+            }
+          ]
+        },
+        {
+          "id": "external-acl",
+          "title": "External ACL Helpers",
+          "content": "<h2>Beyond Static ACLs</h2>\n<p>The ACLs we've covered so far are static — you define domains, ports, or IP ranges in <code>squid.conf</code> and restart. But what if you need access decisions that are dynamic? For example:</p>\n<ul>\n  <li>Allow access based on a database lookup</li>\n  <li>Check an external API to decide if a URL is allowed</li>\n  <li>Apply time-based quotas per user</li>\n  <li>Integrate with a custom identity provider</li>\n</ul>\n<p>This is where <code>external_acl_type</code> comes in. It lets Squid delegate ACL decisions to an external helper program.</p>\n\n<h2>How It Works</h2>\n<p>Squid spawns one or more instances of your helper program as child processes. When a request matches an external ACL, Squid sends the request details to the helper via stdin, and the helper responds via stdout with <code>OK</code> (allow) or <code>ERR</code> (deny).</p>\n<div class=\"config-block\"># Define an external ACL type\nexternal_acl_type url_check %URI /usr/local/bin/url-checker.sh\n\n# Create an ACL that uses it\nacl allowed_urls external url_check\n\n# Use it in access rules\nhttp_access allow allowed_urls\nhttp_access deny all</div>\n\n<h2>Format Tokens</h2>\n<p>The <code>%</code> tokens in the definition control what information Squid sends to the helper:</p>\n<ul>\n  <li><code>%SRC</code> — client IP address</li>\n  <li><code>%URI</code> — the full request URI</li>\n  <li><code>%DST</code> — destination hostname</li>\n  <li><code>%METHOD</code> — HTTP method (GET, POST, CONNECT)</li>\n  <li><code>%LOGIN</code> — authenticated username (if auth is configured)</li>\n  <li><code>%PROTO</code> — protocol (HTTP or HTTPS)</li>\n</ul>\n\n<h2>A Simple Helper Script</h2>\n<p>Helpers can be written in any language. Here's a minimal bash example that allows URLs in a dynamic allowlist file:</p>\n<div class=\"config-block\">#!/bin/bash\n# /usr/local/bin/url-checker.sh\n# Reads URLs from stdin, checks against an allowlist file\nwhile read uri; do\n  domain=$(echo \"$uri\" | sed 's|https\\?://||' | cut -d/ -f1)\n  if grep -q \"$domain\" /etc/squid/dynamic-allowlist.txt; then\n    echo \"OK\"\n  else\n    echo \"ERR\"\n  fi\ndone</div>\n<p>The allowlist file can be updated at any time without restarting Squid — the helper reads it on each request. This is what makes external ACLs dynamic.</p>\n\n<h2>Performance Considerations</h2>\n<p>Squid waits for the helper's response before processing the request, so helper latency directly impacts request latency. To mitigate this:</p>\n<ul>\n  <li><code>external_acl_type url_check concurrency=5 ...</code> — run multiple helpers in parallel for throughput</li>\n  <li><code>external_acl_type url_check ttl=300 ...</code> — cache the helper's response for 5 minutes so repeated requests for the same resource don't hit the helper again</li>\n  <li><code>external_acl_type url_check children-max=20 children-startup=5 ...</code> — control how many helper processes Squid spawns</li>\n</ul>\n<p>For high-traffic proxies, write helpers in a compiled language (Go, C) rather than shell scripts, and use the <code>concurrency</code> option for multiplexed I/O.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "How does Squid communicate with external ACL helpers?",
+              "options": [
+                "Via HTTP requests to a REST API endpoint",
+                "Through a Unix socket with JSON messages",
+                "Via stdin/stdout — Squid sends request details, the helper responds with OK or ERR",
+                "By reading a shared configuration file that the helper updates"
+              ],
+              "correct": 2,
+              "explanation": "Squid spawns the helper as a child process and communicates via stdin/stdout. Squid writes request details (formatted according to the % tokens) to the helper's stdin, and the helper writes <code>OK</code> or <code>ERR</code> to stdout. This simple protocol makes helpers easy to write in any language."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
