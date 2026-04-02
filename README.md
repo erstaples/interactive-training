@@ -31,8 +31,8 @@ The assistant is scoped per-section — each `<h2>` section gets its own "Ask ab
 
 Training content is decoupled from the platform. To create a new module:
 
-1. Add a JSON file to `content/` following the schema below
-2. Add the filename to `content/index.json`
+1. Add a JSON file to `courses/` following the schema below
+2. Add the filename to `courses/index.json`
 
 ### Content Schema
 
@@ -102,7 +102,7 @@ interactive-training/
 │   ├── exercises.js        # Quiz + config-editor validation
 │   ├── ai-widget.js        # Per-section AI chat, Anthropic API
 │   └── store.js            # localStorage persistence
-└── content/
+└── courses/
     ├── index.json          # Course manifest
     └── squid-proxy.json    # Example: Squid proxy training
 ```

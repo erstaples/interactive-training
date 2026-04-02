@@ -28,10 +28,10 @@ async function init() {
 
   // Load course manifest
   try {
-    const res = await fetch('content/index.json');
+    const res = await fetch('courses/index.json');
     const manifest = await res.json();
     const coursePromises = manifest.map(async filename => {
-      const r = await fetch(`content/${filename}`);
+      const r = await fetch(`courses/${filename}`);
       return r.json();
     });
     courses = await Promise.all(coursePromises);
