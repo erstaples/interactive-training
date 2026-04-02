@@ -152,8 +152,8 @@ The full course schema:
 After creating the JSON file:
 1. Place it in `courses/`
 2. Add its filename to `courses/index.json`
-3. Verify it loads: `make serve` and open in browser
-4. Validate the JSON parses correctly and all lessons render
+3. Run `make validate` to confirm all course JSON files parse correctly
+4. Verify it loads: `make serve` and open in browser
 
 ### Quality Checklist
 
@@ -167,4 +167,4 @@ Before considering a course complete:
 - [ ] Gotchas and non-obvious details are called out explicitly
 - [ ] Later lessons reference earlier ones where concepts connect
 - [ ] The course can be completed in order without needing to jump around
-- [ ] JSON is valid (run through `python3 -c "import json; json.load(open('courses/file.json'))"`)
+- [ ] JSON is valid (`make validate` passes)

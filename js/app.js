@@ -65,7 +65,6 @@ function showCoursePicker() {
   document.getElementById('topbar-title').textContent = 'Interactive Training';
   document.getElementById('progress-text').textContent = '';
   document.getElementById('progress-fill').style.width = '0%';
-  document.getElementById('ai-widget').style.display = 'none';
 
   const main = document.getElementById('main-content');
   main.innerHTML = `<h1 style="padding-bottom:1rem">Select a Course</h1>

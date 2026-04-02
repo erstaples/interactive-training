@@ -1,0 +1,360 @@
+{
+  "id": "vim-advanced",
+  "title": "Supercharging Vim",
+  "description": "Level up from vim basics to expert-level editing with text objects, macros, ex commands, and more.",
+  "modules": [
+    {
+      "id": "grammar",
+      "number": 1,
+      "title": "Vim's Grammar: Operators, Text Objects, and the Dot Command",
+      "lessons": [
+        {
+          "id": "operator-motion",
+          "title": "The Operator-Motion Equation",
+          "content": "<h2>Vim Has a Grammar</h2>\n<p>Most editors are modal in the sense that you click somewhere and start typing. Vim is different: it has a <em>language</em>. Commands are composed of <strong>operators</strong> and <strong>motions</strong>, and once you internalize this grammar, you can construct commands you've never used before and they just work.</p>\n<p>The formula is simple: <code>operator + motion = action</code>. For example, <code>d</code> is the delete operator. <code>w</code> moves forward one word. So <code>dw</code> deletes forward one word. The same pattern applies to every operator.</p>\n\n<h2>The Core Operators</h2>\n<p>These are the operators you should know cold:</p>\n<ul>\n  <li><code>d</code> — delete (removes text and stores in register)</li>\n  <li><code>c</code> — change (deletes text and enters insert mode)</li>\n  <li><code>y</code> — yank (copy to register)</li>\n  <li><code>v</code> — visual select</li>\n  <li><code>=</code> — auto-indent</li>\n  <li><code>&gt;</code> / <code>&lt;</code> — indent right / indent left</li>\n  <li><code>!</code> — filter through an external command</li>\n  <li><code>gU</code> — uppercase</li>\n  <li><code>gu</code> — lowercase</li>\n  <li><code>g~</code> — toggle case</li>\n</ul>\n<p>Every one of these operators works with every motion and every text object. That's what makes the grammar so powerful.</p>\n\n<h2>Doubling an Operator Acts on the Line</h2>\n<p>Any operator doubled acts on the current line: <code>dd</code> deletes the line, <code>cc</code> changes the line, <code>yy</code> yanks the line, <code>==</code> re-indents the line, <code>&gt;&gt;</code> indents the line. This is a consistent rule across all operators — no memorization needed.</p>\n\n<h2>Counts Multiply Everything</h2>\n<p>Any operator or motion can be preceded by a count: <code>3w</code> moves three words forward. <code>d2w</code> deletes two words. <code>y3j</code> yanks three lines down. <code>5&gt;&gt;</code> indents five lines.</p>\n<p>One important gotcha: <strong>counts interact with the dot command</strong>. If you type <code>d3w</code> and then press <code>.</code>, it will delete three more words. Sometimes that's what you want — but often you want to delete one word at a time with repetition. Text objects (covered next) are usually a better tool than counts for this reason.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You want to uppercase the text inside a pair of parentheses without selecting it manually. Which command does this?",
+              "options": [
+                "gUi(",
+                "UUi(",
+                "guu(",
+                "uppercase("
+              ],
+              "correct": 0,
+              "explanation": "gU is the uppercase operator, and i( is the 'inside parentheses' text object. So gUi( means 'uppercase everything inside the nearest parentheses.' The g prefix is needed because U alone (without g) is a normal-mode command to uppercase a visual selection, not an operator."
+            },
+            {
+              "type": "quiz",
+              "question": "What does the command <code>3==</code> do?",
+              "options": [
+                "Checks if the current line is equal to line 3",
+                "Re-indents 3 lines starting from the current line",
+                "Sets indentation depth to 3",
+                "Nothing — == only works with visual selection"
+              ],
+              "correct": 1,
+              "explanation": "== is the auto-indent operator doubled (acts on current line). Prefixing with 3 means 'apply to 3 lines.' So 3== re-indents the current line and the two lines below it. This follows the general rule: count + doubled-operator acts on that many lines."
+            }
+          ]
+        },
+        {
+          "id": "text-objects",
+          "title": "Text Objects: The Key to Precise Editing",
+          "content": "<h2>What Is a Text Object?</h2>\n<p>A <strong>text object</strong> is a chunk of text defined by structure rather than by position. Instead of saying \"move 4 characters left then delete 7 characters right,\" you say \"delete the word\" or \"change the contents of these quotes.\" Text objects are what make vim feel magical once they click.</p>\n<p>Text objects only work inside operator context or visual mode — you can't use them for movement on their own. Think of them as the nouns in vim's grammar.</p>\n\n<h2>Inner vs. Around</h2>\n<p>Every text object comes in two flavors:</p>\n<ul>\n  <li><code>i</code> (inner) — selects the contents, excluding the delimiters</li>\n  <li><code>a</code> (around) — selects the contents including the delimiters</li>\n</ul>\n<p>For example, with your cursor anywhere inside <code>\"hello world\"</code>:</p>\n<ul>\n  <li><code>ci\"</code> — delete the text between the quotes and enter insert mode (quotes stay)</li>\n  <li><code>da\"</code> — delete the entire thing including the quotes</li>\n</ul>\n<p>The rule of thumb: use <code>i</code> when you want to replace the contents, use <code>a</code> when you want to remove the whole structure.</p>\n\n<h2>The Essential Text Objects</h2>\n<ul>\n  <li><code>iw</code> / <code>aw</code> — inner/around <strong>word</strong> (stops at punctuation)</li>\n  <li><code>iW</code> / <code>aW</code> — inner/around <strong>WORD</strong> (whitespace-delimited, crosses punctuation)</li>\n  <li><code>i\"</code> / <code>a\"</code> — inside/around double quotes</li>\n  <li><code>i'</code> / <code>a'</code> — inside/around single quotes</li>\n  <li><code>i`</code> / <code>a`</code> — inside/around backticks</li>\n  <li><code>i(</code> / <code>a(</code> or <code>ib</code> / <code>ab</code> — inside/around parentheses</li>\n  <li><code>i{</code> / <code>a{</code> or <code>iB</code> / <code>aB</code> — inside/around curly braces</li>\n  <li><code>i[</code> / <code>a[</code> — inside/around square brackets</li>\n  <li><code>it</code> / <code>at</code> — inside/around HTML/XML <strong>tags</strong></li>\n  <li><code>ip</code> / <code>ap</code> — inside/around <strong>paragraph</strong> (blank-line delimited)</li>\n  <li><code>is</code> / <code>as</code> — inside/around <strong>sentence</strong></li>\n</ul>\n\n<h2>Text Objects Don't Require Precise Cursor Position</h2>\n<p>This is the big gotcha that trips people up at first: you don't need to position your cursor at the start of the text object. As long as you're <em>anywhere inside it</em>, vim finds it. Your cursor can be in the middle of a word, anywhere between quotes, or anywhere inside a function body — the text object still works.</p>\n<p>This means a workflow like: jump to the general area, then use <code>ci\"</code> to change the string contents, is completely valid and often faster than positioning precisely.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "Your cursor is on the 'o' in the word 'world' inside the string <code>greeting = \"hello world\"</code>. What does <code>di\"</code> do?",
+              "options": [
+                "Deletes only the word 'world'",
+                "Deletes 'hello world' (leaving the quotes in place)",
+                "Deletes the entire string including the quotes",
+                "Does nothing — cursor must be on a quote character"
+              ],
+              "correct": 1,
+              "explanation": "di\" deletes the 'inner' contents of the nearest double-quoted string, which means everything between the quotes but not the quotes themselves. Cursor position within the string doesn't matter — vim finds the enclosing quotes. To also delete the quotes, you'd use da\"."
+            },
+            {
+              "type": "quiz",
+              "question": "What is the difference between <code>dw</code> and <code>diw</code>?",
+              "options": [
+                "They are identical",
+                "dw deletes from cursor to end of word; diw deletes the entire word regardless of cursor position within it",
+                "diw only works in visual mode",
+                "dw works on WORDs, diw works on words"
+              ],
+              "correct": 1,
+              "explanation": "dw is an operator+motion: it deletes from the current cursor position to the start of the next word. If your cursor is in the middle of a word, dw only deletes the second half. diw is an operator+text-object: it deletes the entire word no matter where your cursor is within it, including any surrounding whitespace handling."
+            }
+          ]
+        },
+        {
+          "id": "dot-command",
+          "title": "The Dot Command: Repeating Changes",
+          "content": "<h2>What the Dot Command Does</h2>\n<p>The dot command (<code>.</code>) repeats your last <em>change</em>. A change is any single insert, delete, or operator+motion combination. This sounds simple, but when combined with motions and search, it becomes one of the most powerful tools in vim.</p>\n<p>The key insight: <strong>design your edits to be repeatable</strong>. When you're about to make a change that you'll need to make again, choose the form of the edit that works best with <code>.</code>.</p>\n\n<h2>The n. Pattern</h2>\n<p>The single most useful application of the dot command:</p>\n<ol>\n  <li>Search for the thing you want to change: <code>/foo</code></li>\n  <li>Make your change with a single command: <code>cw</code>, <code>ciw</code>, <code>A something</code>, etc.</li>\n  <li>Press <code>n</code> to jump to the next match</li>\n  <li>Press <code>.</code> to repeat the change</li>\n  <li>Repeat <code>n.</code> as needed</li>\n</ol>\n<p>Compare this to <code>:%s/foo/bar/gc</code> (confirm each replacement) — sometimes that's right, but <code>n.</code> gives you fine-grained control: skip some occurrences with <code>n</code> alone, apply to others with <code>n.</code>.</p>\n\n<h2>Designing Dot-Friendly Changes</h2>\n<p>Some editing approaches are dot-friendly, others aren't:</p>\n<ul>\n  <li><strong>Good</strong>: <code>cw</code> then type new text — repeatable, changes whatever word the cursor is on</li>\n  <li><strong>Bad</strong>: <code>dllllllllll</code> — counting characters isn't repeatable in a useful way</li>\n  <li><strong>Good</strong>: <code>A;</code><code>&lt;Esc&gt;</code> — append a semicolon to end of line; repeatable on any line</li>\n  <li><strong>Good</strong>: <code>I// </code><code>&lt;Esc&gt;</code> — prepend a comment marker; repeatable on any line</li>\n</ul>\n<p>The principle: use text objects and structural motions, not character counts. Text objects are repeatable because they find structure; character counts only work for the specific case you counted.</p>\n\n<h2>The cgn Pattern</h2>\n<p><code>cgn</code> is a more powerful variant. After searching with <code>/pattern</code>, <code>cgn</code> changes the next match of your search (it's the <code>c</code> operator applied to the <code>gn</code> motion, which selects the next search match). After making your change and pressing <code>&lt;Esc&gt;</code>, pressing <code>.</code> moves to the next match <em>and</em> applies the same change in one keystroke. No separate <code>n</code> needed.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You have a file with 'console.log' appearing 20 times and you want to change some of them to 'logger.info'. Which approach gives you the most control to change some occurrences but not others?",
+              "options": [
+                ":%s/console.log/logger.info/g",
+                "Search for /console.log, then use cgn to change the first match, then . to repeat selectively (skipping with n when needed)",
+                "Visually select all occurrences with gn and change at once",
+                ":%s/console.log/logger.info/c confirms each one, which is the same thing"
+              ],
+              "correct": 1,
+              "explanation": "The cgn + . pattern is ideal for selective replacement. After /console.log, cgn changes the current match. Then: . applies the change and moves to the next match, while n skips without changing. The /c flag on :s does work but requires a keypress for every single occurrence including ones you want to keep — n. lets you skip batches of occurrences at once by hitting n multiple times."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "navigation",
+      "number": 2,
+      "title": "Precision Navigation: Motions, Marks, and Search",
+      "lessons": [
+        {
+          "id": "advanced-motions",
+          "title": "Advanced Motions",
+          "content": "<h2>Line-Scoped Character Search: f and t</h2>\n<p><code>f{char}</code> jumps the cursor to the next occurrence of <em>char</em> on the current line. <code>F{char}</code> searches backward. <code>t{char}</code> and <code>T{char}</code> are the same, but stop <em>one character before</em> the target (think: \"up-to but not including\").</p>\n<p>After an <code>f</code> or <code>t</code> jump, <code>;</code> repeats the search in the same direction and <code>,</code> reverses it. This makes scanning forward through a line very fast: <code>f(</code> to jump to the first paren, <code>;</code> to jump to the next, and so on.</p>\n<p>Gotcha: <code>f</code> and <code>t</code> only search within the current line. They don't wrap to the next line.</p>\n<p>These are operators too — <code>df,</code> deletes from the cursor to the next comma. <code>ct\"</code> changes everything up to the next double quote and enters insert mode.</p>\n\n<h2>Matching Bracket Pairs: %</h2>\n<p><code>%</code> jumps between matching bracket pairs: <code>()</code>, <code>[]</code>, <code>{}</code>. If your cursor is on an opening bracket, it jumps to the matching close. If it's on a closing bracket, it jumps to the matching open.</p>\n<p>With the <code>matchit</code> plugin (or vim's built-in one, enabled with <code>:packadd matchit</code>), <code>%</code> also works on language keywords like <code>if/else/end</code>, <code>def/end</code>, HTML tags, etc. Highly recommended.</p>\n\n<h2>Block Navigation: [{ ]} [( ])</h2>\n<p>When your cursor is inside a code block, <code>[{</code> jumps to the opening <code>{</code> of the enclosing block. <code>]}</code> jumps to the closing <code>}</code>. Similarly, <code>[(</code> and <code>])</code> for parentheses.</p>\n<p>This is invaluable in deeply nested code — no need to count brackets or search manually.</p>\n\n<h2>Screen-Level Navigation</h2>\n<p><code>H</code> / <code>M</code> / <code>L</code> move the cursor to the <strong>H</strong>igh (top), <strong>M</strong>iddle, or <strong>L</strong>ow line of the screen. This is useful when you can see where you want to go but it's far from the cursor.</p>\n<p>Separate from cursor movement, you can scroll the viewport without moving the cursor:</p>\n<ul>\n  <li><code>zt</code> — scroll to put the cursor line at the <strong>t</strong>op</li>\n  <li><code>zz</code> — scroll to put the cursor line in the <strong>middle</strong></li>\n  <li><code>zb</code> — scroll to put the cursor line at the <strong>b</strong>ottom</li>\n</ul>\n<p><code>zz</code> is especially useful after jumping somewhere: it centers the view so you have context above and below.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "Your cursor is on the first character of this line: <code>result = myFunc(arg1, arg2, arg3)</code>. You want to delete everything from your cursor up to (but not including) the opening parenthesis. Which command does this?",
+              "options": [
+                "df(",
+                "dt(",
+                "d/(",
+                "da("
+              ],
+              "correct": 1,
+              "explanation": "dt( uses the 't' motion which moves up-to-but-not-including the next '('. So dt( deletes from cursor to just before the '(', leaving the parenthesis in place. df( would include the '(' in the deletion. da( would delete the content inside the parentheses including the parens themselves (text object). d/( would work but requires confirming the search."
+            }
+          ]
+        },
+        {
+          "id": "marks-jumps",
+          "title": "Marks and the Jump List",
+          "content": "<h2>Setting and Using Marks</h2>\n<p>Marks are named positions in a file. <code>m{a-z}</code> sets a mark. <code>'{mark}</code> jumps to the start of the line containing the mark. <code>`{mark}</code> (backtick) jumps to the exact cursor position.</p>\n<p>Lowercase marks (<code>a-z</code>) are buffer-local — each buffer has its own set. Uppercase marks (<code>A-Z</code>) are global: they include the file path, so <code>'A</code> will jump to the marked position in whatever file it was set, even if that file isn't currently open. Use uppercase marks to bookmark locations you'll return to across files.</p>\n\n<h2>Special Marks You Should Know</h2>\n<p>Vim sets several marks automatically:</p>\n<ul>\n  <li><code>''</code> or <code>``</code> — jump back to the position before the last jump (pressing twice toggles between two locations)</li>\n  <li><code>'.</code> — jump to the position of the last change (works across sessions if viminfo is enabled)</li>\n  <li><code>'^</code> — last insert position</li>\n  <li><code>'[</code> and <code>']</code> — start and end of the last yanked or changed text</li>\n  <li><code>'&lt;</code> and <code>'&gt;</code> — start and end of the last visual selection</li>\n</ul>\n<p>The <code>''</code> mark in particular is like a back button for vim. After any big jump (jumping to a definition, searching to a distant location), <code>''</code> brings you right back.</p>\n\n<h2>The Jump List</h2>\n<p>Every time you make a \"jump\" — a move that skips across more than a few lines — vim records it in the <strong>jump list</strong>. Jumps include: <code>G</code>, <code>gg</code>, <code>/search</code>, <code>?search</code>, mark jumps, <code>%</code>, and <code>:linenumber</code>.</p>\n<p><code>Ctrl-O</code> moves backward through the jump list. <code>Ctrl-I</code> moves forward. <code>:jumps</code> shows the full list.</p>\n<p>This is particularly useful after a search or a tag jump — you can explore a new location, do some reading or editing, and <code>Ctrl-O</code> your way back to exactly where you were.</p>\n\n<h2>The Change List</h2>\n<p>Separate from the jump list, vim also tracks every location where you made a change. <code>g;</code> goes to the previous change location, <code>g,</code> goes forward. <code>:changes</code> shows the list. Useful when you're editing in multiple spots and want to quickly return to where you last typed.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You're working in file A, jump to file B to check something, do some edits, and want to return to your previous location in file A. What's the fastest way?",
+              "options": [
+                ":e fileA then use '.",
+                "Ctrl-O (jump list goes back)",
+                "Use a lowercase mark set before leaving",
+                ":b# to switch to the alternate buffer"
+              ],
+              "correct": 1,
+              "explanation": "Ctrl-O is the best answer here — it navigates backward through the jump list, which includes cross-file jumps. It will take you back to exactly where you were in file A. :b# does switch to the alternate buffer but doesn't restore your cursor position. Lowercase marks don't survive a buffer switch unless you use uppercase marks (mA). '.' takes you to the last change, which would be in file B."
+            }
+          ]
+        },
+        {
+          "id": "search-mastery",
+          "title": "Search as a Navigation Tool",
+          "content": "<h2>* and # for Word Search</h2>\n<p><code>*</code> searches forward for the word under the cursor. <code>#</code> searches backward. Both automatically add word boundaries — so searching for <code>foo</code> with <code>*</code> won't match <code>foobar</code>. <code>g*</code> and <code>g#</code> are the boundary-less versions.</p>\n<p>After pressing <code>*</code>, you can use <code>n</code> and <code>N</code> to navigate between matches. This is the fastest way to find all uses of a variable or function name.</p>\n\n<h2>Very Magic Mode: \\v</h2>\n<p>Vim's default regex flavor is awkward — most special characters need backslash-escaping. <code>\\v</code> (very magic) makes vim's regex behave more like Perl/Python regex: <code>+</code>, <code>|</code>, <code>()</code>, <code>{}</code> all work without backslashes.</p>\n<p>Compare:</p>\n<ul>\n  <li>Default: <code>/\\(foo\\|bar\\)\\+</code></li>\n  <li>Very magic: <code>/\\v(foo|bar)+</code></li>\n</ul>\n<p>Just put <code>\\v</code> at the start of your pattern and write normal regex. This is especially helpful for complex substitutions.</p>\n\n<h2>Search Tricks</h2>\n<p>A few non-obvious search behaviors that are worth knowing:</p>\n<ul>\n  <li><strong>Empty pattern reuse</strong>: <code>/</code> followed by Enter reuses the last pattern. Same in <code>:s</code> — <code>:s//replacement/</code> uses the last search as the pattern.</li>\n  <li><strong>Offset</strong>: <code>/pattern/2</code> places the cursor 2 lines below the match. <code>/pattern/e</code> places it at the end of the match. Useful for positioning before making a change.</li>\n  <li><strong>:noh</strong>: clears the search highlight without changing the search pattern. Map it: <code>nnoremap &lt;C-l&gt; :noh&lt;CR&gt;&lt;C-l&gt;</code></li>\n</ul>\n\n<h2>The cgn Pattern Revisited</h2>\n<p>As mentioned in the dot command lesson, <code>gn</code> is a motion that selects the next match of your search. <code>cgn</code> changes it. After pressing <code>&lt;Esc&gt;</code>, <code>.</code> both jumps to the next match and applies the same change. This is the most efficient way to make the same edit to multiple occurrences when you don't want to replace all of them blindly.</p>\n<p>Workflow: <code>/pattern</code> &rarr; <code>cgn</code> &rarr; type replacement &rarr; <code>&lt;Esc&gt;</code> &rarr; <code>.</code> (repeat) or <code>n</code> (skip).</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "Which search pattern uses 'very magic' mode to match either 'ERROR' or 'WARN' followed by one or more digits?",
+              "options": [
+                "/\\(ERROR\\|WARN\\)\\d\\+",
+                "/\\v(ERROR|WARN)\\d+",
+                "/\\v(ERROR|WARN)\\d\\+",
+                "/\\v(ERROR|WARN)[0-9]+"
+              ],
+              "correct": 3,
+              "explanation": "In \\v (very magic) mode, +, |, (), and [] all work without backslashes — just like standard regex. So /\\v(ERROR|WARN)[0-9]+ is correct. Option B is wrong because \\d is a vim-specific character class that still needs the backslash even in very magic mode — [0-9]+ is clearer. Option C mixes styles. Option A is the non-very-magic equivalent, which is harder to read."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "registers-macros",
+      "number": 3,
+      "title": "Registers and Macros",
+      "lessons": [
+        {
+          "id": "registers",
+          "title": "Understanding Registers",
+          "content": "<h2>Registers Are Named Clipboards</h2>\n<p>Vim has 26 named registers (<code>a</code>-<code>z</code>), plus a collection of special-purpose registers. You access them with <code>\"</code> before the register name: <code>\"ayy</code> yanks the current line into register <code>a</code>, and <code>\"ap</code> pastes from register <code>a</code>.</p>\n<p>To paste in insert mode, use <code>Ctrl-R {register}</code>. <code>Ctrl-R a</code> inserts the contents of register <code>a</code> at the cursor without leaving insert mode.</p>\n\n<h2>The Special Registers You Need</h2>\n<ul>\n  <li><code>\"0</code> — always contains the last <em>yank</em> (not affected by deletes or changes)</li>\n  <li><code>\"\"</code> — the unnamed register; default destination for <code>d</code>, <code>c</code>, <code>y</code>, and <code>p</code></li>\n  <li><code>\"_</code> — the black hole register; deletions sent here don't overwrite anything</li>\n  <li><code>\"+</code> — the system clipboard (requires vim compiled with clipboard support; check with <code>:echo has('clipboard')</code>)</li>\n  <li><code>\"*</code> — X11 primary selection (Linux middle-click)</li>\n  <li><code>\":</code> — the last ex command run</li>\n  <li><code>\"/</code> — the last search pattern</li>\n  <li><code>\".</code> — the last inserted text</li>\n  <li><code>\"%</code> — the current filename</li>\n</ul>\n\n<h2>The \"0 Register Saves the Day</h2>\n<p>Here's the most common register frustration: you yank some text, then delete something, and now <code>p</code> pastes the deleted text instead of what you yanked. This happens because <code>d</code> overwrites the unnamed register.</p>\n<p>The fix: <code>\"0p</code> always pastes the last yanked text, regardless of what you've deleted since. Make <code>\"0p</code> muscle memory.</p>\n\n<h2>The Black Hole Register</h2>\n<p>The <code>\"_</code> register is a discard slot. <code>\"_d{motion}</code> or <code>\"_dd</code> deletes without touching any register — the unnamed register and all named registers stay untouched. This is critical when you want to delete something but preserve what's in the unnamed register for pasting.</p>\n<p>Common pattern: yank the replacement text, then use <code>\"_d{motion}</code> to delete the thing you're replacing, then <code>p</code> to paste the replacement. Without <code>\"_d</code>, the delete would overwrite your yanked text.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You yanked the text 'replacement_value' with yy, then deleted a line with dd. Now you press p. What gets pasted?",
+              "options": [
+                "replacement_value (your yank)",
+                "The deleted line",
+                "Nothing — the register was cleared",
+                "Both, in sequence"
+              ],
+              "correct": 1,
+              "explanation": "dd overwrites the unnamed register (\"\"), so p pastes the deleted line, not your yank. This is a very common frustration. The fix: use \"0p to paste from register 0, which always holds the last yank and is never overwritten by deletes."
+            },
+            {
+              "type": "quiz",
+              "question": "You want to replace a word with previously yanked text, but when you delete the word first, it overwrites your yank. Which delete command avoids this problem?",
+              "options": [
+                "\"adw (save to register a first)",
+                "\"_dw (delete to black hole register)",
+                "xp (swap characters instead)",
+                "You have to yank again after deleting"
+              ],
+              "correct": 1,
+              "explanation": "\"_dw sends the deletion to the black hole register, which doesn't overwrite anything. Your original yank stays in the unnamed register and you can paste it with p. Alternatively you could use \"0p after a normal dw, since \"0 always holds the last yank."
+            }
+          ]
+        },
+        {
+          "id": "macros-basics",
+          "title": "Recording and Replaying Macros",
+          "content": "<h2>Macros Are Just Recorded Keystrokes</h2>\n<p>A macro in vim is a sequence of keystrokes recorded to a register. <code>q{register}</code> starts recording, <code>q</code> stops it. <code>@{register}</code> replays the macro. <code>@@</code> replays the last-run macro.</p>\n<p>Since macros are stored in registers, you can inspect a macro with <code>:reg a</code> (shows register <code>a</code>), and you can manually edit macros too (more on that below).</p>\n\n<h2>Principles for Writing Good Macros</h2>\n<p>Bad macros break when the content changes slightly. Good macros work on any line they're designed for. The key principles:</p>\n<ol>\n  <li><strong>Start from a predictable position.</strong> Begin your macro by moving to a known anchor: <code>0</code> (start of line), <code>^</code> (first non-blank), or a specific search result. Never start in the middle of something and assume the cursor will be there.</li>\n  <li><strong>Use text objects and structural motions, not character counts.</strong> <code>ciw</code> works on any word; <code>5dl</code> only works when the target is exactly 5 characters.</li>\n  <li><strong>End by moving to the next target.</strong> End your macro with <code>j</code> to move to the next line, or <code>/pattern&lt;CR&gt;</code> to jump to the next occurrence. This way you can chain replays.</li>\n</ol>\n\n<h2>Running a Macro at Scale</h2>\n<p>Once you've recorded a working macro, there are several ways to run it at scale:</p>\n<ul>\n  <li><code>100@a</code> — run macro <code>a</code> up to 100 times; stops automatically when it errors (e.g., hits end of file)</li>\n  <li>Visual select lines, then <code>:'&lt;,'&gt;norm @a</code> — run the macro on each selected line</li>\n  <li><code>:g/pattern/norm @a</code> — run the macro on every line matching a pattern</li>\n</ul>\n<p>The \"run and stop on error\" behavior of <code>100@a</code> is actually useful — it naturally handles \"run until there's nothing left to process.\"</p>\n\n<h2>Editing a Macro</h2>\n<p>Macros live in registers, so you can edit them like text:</p>\n<ol>\n  <li><code>\"ap</code> — paste the macro into a buffer</li>\n  <li>Edit it like normal text (including special keys: <code>Ctrl-V Ctrl-M</code> inserts a literal Enter)</li>\n  <li><code>\"ayy</code> — yank the line back into register <code>a</code></li>\n</ol>\n<p>Alternatively: <code>:let @a='...'</code> sets a register directly from the command line. Special keys use their escape sequences: <code>\\r</code> for Enter, <code>\\&lt;Esc&gt;</code> for Escape.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You record a macro that works perfectly on the first line but fails on the 3rd line because that line has a differently-sized word. What's most likely the root cause?",
+              "options": [
+                "Macros can't handle variable-length content",
+                "The macro used character counts (like 5l or ddddd) instead of text objects or word motions",
+                "You need to re-record the macro for each line",
+                "The macro should have been recorded to an uppercase register"
+              ],
+              "correct": 1,
+              "explanation": "Macros that use character counts (5l, 3x, ddddd) only work when the content is exactly the expected size. When line 3 has a different word length, the count-based motions overshoot or undershoot. The fix is to use text objects (ciw, diw) and word-boundary motions (w, e, b) which adapt to content size."
+            }
+          ]
+        },
+        {
+          "id": "macros-advanced",
+          "title": "Advanced Macro Techniques",
+          "content": "<h2>Recursive Macros</h2>\n<p>A macro can call itself at the end, creating a loop that runs until it hits an error (like end of file). The trick: you must clear the register before recording, otherwise the first self-call plays the old version.</p>\n<p>Recipe:</p>\n<ol>\n  <li><code>:let @q=''</code> — clear register q</li>\n  <li><code>qq</code> — start recording to q</li>\n  <li>... your editing commands ...</li>\n  <li><code>@q</code> — call q recursively (currently empty, so does nothing during recording)</li>\n  <li><code>q</code> — stop recording</li>\n  <li><code>@q</code> — run it; it will recurse until an error stops it</li>\n</ol>\n<p>Recursive macros are powerful but can cause havoc if your macro doesn't have a natural stopping condition. Make sure the macro will hit an error (like trying to move past end of file) rather than running forever.</p>\n\n<h2>Appending to a Macro</h2>\n<p>If you forgot to add something at the end of a macro, you don't need to re-record from scratch. Using an <strong>uppercase</strong> register name appends to the register instead of replacing it: <code>qA</code> appends to register <code>a</code>.</p>\n<p>So if register <code>a</code> has a macro you want to extend: <code>qA</code> to start appending, add your extra commands, <code>q</code> to stop. The new commands are added to the end of the existing macro.</p>\n\n<h2>Macros Across Multiple Files</h2>\n<p>Macros work across buffers. If you want to apply the same transformation to 20 files:</p>\n<ol>\n  <li>Load all files with <code>:args *.py</code> (or similar glob)</li>\n  <li>Record your macro</li>\n  <li>Run <code>:argdo norm @q | w</code> — execute the macro on every file in the arglist and save</li>\n</ol>\n<p>Or combine with <code>:g</code>: <code>:g/pattern/norm @q</code> runs the macro on every matching line in the current file. As covered in the ex commands module, <code>:norm</code> executes normal-mode commands, and <code>@q</code> is just another normal-mode command.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You recorded a macro to register 'a' but forgot to add 'j' at the end to move to the next line. How do you add it without re-recording the whole macro?",
+              "options": [
+                "qa (re-record over it) and redo it all",
+                "qA then j then q (uppercase A appends to register a)",
+                ":let @a=@a.'j'",
+                "Both B and C work"
+              ],
+              "correct": 3,
+              "explanation": "Both approaches work. qA starts appending to register a (uppercase = append mode), so qAjq adds j to the end. Alternatively, :let @a=@a.'j' directly appends the character 'j' to the register string. For simple additions like a single character, qA is fastest. For more complex edits, the :let approach or the paste-edit-yank method gives you full editing control."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ex-commands",
+      "number": 4,
+      "title": "Ex Commands: Ranges, Substitute, and Global",
+      "lessons": [
+        {
+          "id": "ranges",
+          "title": "Ranges: Targeting Ex Commands",
+          "content": "<h2>What Is a Range?</h2>\n<p>Most ex commands (commands starting with <code>:</code>) accept a range before them, specifying which lines to operate on. The format is <code>:[range]command</code>. Without a range, most commands operate on the current line.</p>\n\n<h2>Range Syntax</h2>\n<p>Ranges are flexible and composable:</p>\n<ul>\n  <li><code>:5</code> — line 5</li>\n  <li><code>:5,10</code> — lines 5 through 10</li>\n  <li><code>:%</code> — entire file (shorthand for <code>1,$</code>)</li>\n  <li><code>:.</code> — current line</li>\n  <li><code>:$</code> — last line</li>\n  <li><code>:.,+5</code> — current line through the next 5 lines</li>\n  <li><code>:.,$ </code> — current line through end of file</li>\n  <li><code>:'a,'b</code> — from mark a to mark b</li>\n  <li><code>:'&lt;,'&gt;</code> — last visual selection (vim inserts this automatically when you press <code>:</code> in visual mode)</li>\n  <li><code>:/pattern/,/pattern2/</code> — from the line matching pattern to the line matching pattern2</li>\n</ul>\n\n<h2>Ranges Apply to Everything</h2>\n<p>Ranges work with nearly any ex command: <code>:5,10d</code> (delete lines 5-10), <code>:5,10y</code> (yank lines 5-10), <code>:'&lt;,'&gt;sort</code> (sort the selection), <code>:%normal @q</code> (run macro on every line). Once you internalize range syntax, you have precise targeting for any operation.</p>\n\n<h2>Visual Mode and Ranges</h2>\n<p>When you're in visual mode and press <code>:</code>, vim automatically inserts <code>'&lt;,'&gt;</code> into the command line — the range corresponding to your visual selection. This is the most common way to target a specific block of lines for a substitute or global command without knowing the exact line numbers.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You want to delete all lines from the current line to the end of the file. Which command does this?",
+              "options": [
+                ":.,$ d",
+                ":%d",
+                ":$d",
+                ":.,end d"
+              ],
+              "correct": 0,
+              "explanation": ":.,$d uses a range from the current line (.) to the last line ($), and the d command deletes them. :%d would delete the entire file. :$d would delete only the last line. :.,end d is not valid syntax — there is no 'end' keyword."
+            }
+          ]
+        },
+        {
+          "id": "substitute",
+          "title": "The Substitute Command, Deeply",
+          "content": "<h2>The Basic Form</h2>\n<p>You likely know <code>:s/pattern/replacement/</code>. Without flags, it replaces the first match on the current line. With <code>%</code> range and <code>g</code> flag — <code>:%s/pattern/replacement/g</code> — it replaces all occurrences in the file. But there's much more to it.</p>\n\n<h2>Flags</h2>\n<ul>\n  <li><code>g</code> — replace <strong>all</strong> occurrences on each line (without it, only the first)</li>\n  <li><code>i</code> — case-<strong>insensitive</strong> match</li>\n  <li><code>c</code> — <strong>confirm</strong> each replacement interactively</li>\n  <li><code>e</code> — suppress \"no match found\" <strong>error</strong> (useful in scripts and macros)</li>\n  <li><code>n</code> — report the <strong>number</strong> of matches without actually substituting (dry run)</li>\n</ul>\n\n<h2>Capture Groups and Back-References</h2>\n<p>In the replacement string:</p>\n<ul>\n  <li><code>&amp;</code> or <code>\\0</code> — the full match</li>\n  <li><code>\\1</code>, <code>\\2</code> — captured groups (use <code>\\v</code> for cleaner group syntax)</li>\n  <li><code>\\u</code> — uppercase the next character</li>\n  <li><code>\\l</code> — lowercase the next character</li>\n  <li><code>\\U</code> — uppercase everything until <code>\\E</code></li>\n  <li><code>\\L</code> — lowercase everything until <code>\\E</code></li>\n</ul>\n<p>Example — swap two words: <code>:%s/\\v(\\w+) (\\w+)/\\2 \\1/g</code></p>\n<p>Example — capitalize first letter of each word: <code>:%s/\\v&lt;(\\w)/\\u\\1/g</code></p>\n\n<h2>Pattern Reuse</h2>\n<p>When the pattern field is empty, vim reuses the last search: <code>:s//replacement/</code>. This pairs beautifully with <code>*</code> or <code>/</code> — search for the term first to verify matches, then run <code>:s//replacement/g</code> to replace all occurrences without retyping the pattern.</p>\n\n<h2>Practical Recipes</h2>\n<div class=\"config-block\"># Remove trailing whitespace from every line\n:%s/\\s\\+$//e\n\n# Add a semicolon to lines that don't have one\n:%s/\\v([^;])$/\\1;/\n\n# Convert snake_case to camelCase (one step)\n:%s/\\v_(\\a)/\\u\\1/g\n\n# Replace only within a visual selection\n:'<,'>s/old/new/g</div>",
+          "exercises": [
+            {
+              "type": "config-editor",
+              "prompt": "Write a substitute command that removes trailing whitespace from every line in the file. The command should not produce an error if some lines have no trailing whitespace.",
+              "startingConfig": ":%s/",
+              "validators": [
+                {
+                  "regex": "^:%s\\/\\\\s\\\\?\\+\\$\\/\\//",
+                  "flags": "m",
+                  "message": "Pattern should match trailing whitespace",
+                  "hint": "You need \\s\\+$ to match one or more whitespace characters at end of line, and the replacement should be empty. Add the 'e' flag to suppress no-match errors."
+                },
+                {
+                  "regex": "e",
+                  "flags": "",
+                  "message": "Missing 'e' flag",
+                  "hint": "Without the 'e' flag, the command will error on lines that have no trailing whitespace. Add 'e' to the flags."
+                }
+              ],
+              "solution": ":%s/\\s\\+$//e",
+              "solutionNotes": "\\s matches any whitespace character (space, tab). \\+ means one or more. $ anchors to end of line. The replacement is empty (delete). The <code>e</code> flag suppresses the 'no match' error for lines with no trailing whitespace — essential when running this as part of a save hook or macro."
+            }
+          ]
+        },
+        {
+          "id": "global-command",
+          "title": "The Global Command",
+          "content": "<h2>:g Runs Any Ex Command on Matching Lines</h2>\n<p>The global command syntax is <code>:g/pattern/command</code>. It finds every line matching the pattern and runs the specified ex command on it. It's like <code>grep | xargs</code>, but inside vim and with the full power of ex commands.</p>\n<p><code>:v/pattern/command</code> (or equivalently <code>:g!/pattern/command</code>) is the inverse: it runs the command on every line that does <em>not</em> match.</p>\n\n<h2>Essential Recipes</h2>\n<div class=\"config-block\"># Delete all lines containing 'TODO'\n:g/TODO/d\n\n# Delete all blank lines\n:g/^$/d\n\n# Keep only lines matching a pattern (delete all others)\n:v/import/d\n\n# Print all lines containing 'error' (like grep)\n:g/error/p\n\n# Run a substitute only on lines containing 'foo'\n:g/foo/s/bar/baz/g\n\n# Run a macro on every matching line\n:g/def /norm @q\n\n# Append all TODO lines to register t (uppercase = append)\n:g/TODO/yank T</div>\n\n<h2>:g with :norm</h2>\n<p><code>:g/pattern/norm {commands}</code> lets you run any normal-mode command sequence on matching lines. This is one of the most powerful combinations in vim:</p>\n<ul>\n  <li><code>:g/^#/norm I# </code> — add an extra <code># </code> to every comment line</li>\n  <li><code>:g/def /norm =ip</code> — re-indent every paragraph starting with a function definition</li>\n  <li><code>:g/import/norm @q</code> — run your macro on every import line</li>\n</ul>\n\n<h2>A Critical Gotcha: :g Collects Then Executes</h2>\n<p>The global command first collects all matching lines, then executes the command on each one. This means if your command changes whether lines match the pattern (like a substitute), the matching is based on the state <em>before</em> any commands run. This avoids infinite loops but can occasionally produce surprising results when commands add/remove lines.</p>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You want to delete all lines that do NOT contain the string 'import'. Which command does this?",
+              "options": [
+                ":g/import/d",
+                ":v/import/d",
+                ":g/^(?!.*import)/d",
+                ":g/import/keep"
+              ],
+              "correct": 1,
+              "explanation": ":v/pattern/command is the inverse of :g — it runs the command on lines that do NOT match the pattern. So :v/import/d deletes all lines that don't contain 'import', leaving only the import lines. :g/import/d would delete the import lines (the opposite). The regex option works but is unnecessarily complex."
+            },
+            {
+              "type": "config-editor",
+              "prompt": "Write a global command that prepends <code>//</code> to every line that contains the word <code>debug</code>. Use <code>:norm</code> to do the prepending.",
+              "startingConfig": ":g/",
+              "validators": [
+                {
+                  "regex": "^:g\\/debug\\/",
+                  "flags": "m",
+                  "message": "Pattern should match 'debug'",
+                  "hint": "The pattern between the first two slashes should be 'debug' to match lines containing that word."
+                },
+                {
+                  "regex": "norm.*I\\/\\//",
+                  "flags": "",
+                  "message": "Use :norm with I to insert at line start",
+                  "hint": "Use norm I// to insert '//' at the beginning of each matched line. The 'I' command inserts at the start of the line."
+                }
+              ],
+              "solution": ":g/debug/norm I//",
+              "solutionNotes": "<code>:g/debug/</code> selects every line containing 'debug'. <code>norm I//</code> then runs the normal-mode command <code>I//</code> on each of those lines — <code>I</code> enters insert mode at the start of the line, then <code>//</code> is typed and Escape is implied by the end of the norm command."
+            }
+          ]
+        },
+        {
+          "id": "norm-and-friends",
+          "title": ":norm, :sort, and Other Power Commands",
+          "content": "<h2>:norm — Normal Mode Commands as Ex Commands</h2>\n<p><code>:norm[al] {commands}</code> executes a sequence of normal-mode commands on each line in a range. Without a range it runs on the current line. With <code>%</code> it runs on every line. With a visual selection range, it runs on each selected line.</p>\n<ul>\n  <li><code>:%norm A;</code> — append a semicolon to every line in the file</li>\n  <li><code>:'&lt;,'&gt;norm I// </code> — comment out each visually selected line</li>\n  <li><code>:5,10norm dd</code> — delete lines 5-10 (same as <code>:5,10d</code> but shows the pattern)</li>\n</ul>\n<p><strong>:norm vs :norm!</strong>: <code>:norm</code> respects your key mappings; <code>:norm!</code> bypasses them and uses built-in vim commands. Use <code>:norm!</code> in scripts and vimrc to avoid interference from user mappings.</p>\n\n<h2>:sort — Sorting Lines</h2>\n<p><code>:sort</code> sorts lines alphabetically. Works with a range to sort a section. Flags:</p>\n<ul>\n  <li><code>:sort!</code> — reverse sort</li>\n  <li><code>:sort u</code> — sort and remove <strong>u</strong>nique duplicates</li>\n  <li><code>:sort n</code> — <strong>n</strong>umeric sort (sorts numbers by value, not lexicographically)</li>\n  <li><code>:sort i</code> — case-<strong>i</strong>nsensitive</li>\n</ul>\n\n<h2>:t and :m — Copying and Moving Lines</h2>\n<p><code>:t</code> (or <code>:copy</code>) copies lines. <code>:m</code> (or <code>:move</code>) moves them. The argument is the destination line number.</p>\n<ul>\n  <li><code>:5t.</code> — copy line 5 to below the current line</li>\n  <li><code>:t$</code> — copy current line to end of file</li>\n  <li><code>:'&lt;,'&gt;m$</code> — move the visual selection to end of file</li>\n  <li><code>:m0</code> — move current line to the very top</li>\n</ul>\n\n<h2>Shell Integration: :r ! and :%!</h2>\n<p><code>:r !command</code> runs a shell command and inserts its output below the cursor. <code>:r !date</code> inserts the current date. <code>:r !cat other_file.txt</code> inserts another file's contents.</p>\n<p><code>:%!command</code> filters the entire buffer through an external command — the output replaces the buffer. Killer uses:</p>\n<ul>\n  <li><code>:%!python3 -m json.tool</code> — pretty-print JSON in place</li>\n  <li><code>:%!sort</code> — sort the whole file using the system sort</li>\n  <li><code>:'&lt;,'&gt;!column -t</code> — align selected lines into a table</li>\n</ul>",
+          "exercises": [
+            {
+              "type": "quiz",
+              "question": "You want to append a comma to every line in your visual selection. Which command does this?",
+              "options": [
+                ":'<,'>s/$/, /",
+                ":'<,'>norm A,",
+                ":'<,'>s/\\n/,\\n/g",
+                "Both A and B work"
+              ],
+              "correct": 3,
+              "explanation": "Both work. :'<,'>norm A, runs the normal-mode command A, (append comma) on each selected line. :'<,'>s/$/,/ uses substitute to replace the end-of-line anchor with a comma, which effectively appends a comma. The :norm approach is slightly more readable for this case; the :s approach is more powerful when you need conditional logic."
+            },
+            {
+              "type": "quiz",
+              "question": "Which command copies the current line to the very end of the file?",
+              "options": [
+                ":t$",
+                ":m$",
+                ":copy end",
+                ":y$"
+              ],
+              "correct": 0,
+              "explanation": ":t$ uses the :t (copy) command with $ as the destination (last line). This copies the current line to after the last line. :m$ would move the line (not copy it). :copy end is not valid syntax. :y$ is not a valid command (:y yanks but $ is not a destination argument for yank)."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
