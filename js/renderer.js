@@ -46,7 +46,10 @@ function renderEmbeddedThreads(threads, heading) {
     ).join('');
 
     return `<div class="embedded-thread${expanded}" data-timestamp="${thread.timestamp}">
-      <div class="embedded-thread-toggle">${escapeHtml(preview)}</div>
+      <div class="embedded-thread-header">
+        <div class="embedded-thread-toggle">${escapeHtml(preview)}</div>
+        <button class="embedded-thread-delete" data-timestamp="${thread.timestamp}" title="Remove this Q&amp;A">&#10005;</button>
+      </div>
       <div class="embedded-thread-body">${msgHtml}</div>
     </div>`;
   }).join('');

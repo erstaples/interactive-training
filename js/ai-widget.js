@@ -1,4 +1,4 @@
-import { getThreads, saveThread } from './store.js';
+import { getThreads, saveThread, removeThread } from './store.js';
 
 let config = null;
 let currentCourse = null;
@@ -217,16 +217,48 @@ function updateEmbeddedThread(zone, thread) {
     ).join('');
 
     return `<div class="embedded-thread${isActive ? ' expanded' : ''}" data-timestamp="${t.timestamp}">
-      <div class="embedded-thread-toggle">${escapeHtml(preview)}</div>
+      <div class="embedded-thread-header">
+        <div class="embedded-thread-toggle">${escapeHtml(preview)}</div>
+        <button class="embedded-thread-delete" data-timestamp="${t.timestamp}" title="Remove this Q&amp;A">&#10005;</button>
+      </div>
       <div class="embedded-thread-body">${msgHtml}</div>
     </div>`;
   }).join('');
 
-  // Rebind toggles
-  threadContainer.querySelectorAll('.embedded-thread-toggle').forEach(toggle => {
+  // Rebind toggles and delete buttons
+  bindThreadInteractions(threadContainer);
+}
+
+function bindThreadInteractions(container) {
+  container.querySelectorAll('.embedded-thread-toggle').forEach(toggle => {
     toggle.addEventListener('click', () => {
       toggle.closest('.embedded-thread').classList.toggle('expanded');
     });
+  });
+  container.querySelectorAll('.embedded-thread-delete').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const timestamp = parseInt(btn.dataset.timestamp);
+      const threadEl = btn.closest('.embedded-thread');
+      const zone = btn.closest('.section-ai-zone');
+
+      removeThread(currentCourse.id, currentLesson.id, timestamp);
+
+      // If this was the active thread in the chat panel, clear it
+      if (zone._activeThread && zone._activeThread.timestamp === timestamp) {
+        zone._activeThread = null;
+        const panel = zone.querySelector('.section-ai-messages');
+        if (panel) panel.innerHTML = '';
+      }
+
+      threadEl.remove();
+    });
+  });
+}
+
+export function bindThreadDeleteButtons(rootEl) {
+  rootEl.querySelectorAll('.section-embedded-threads').forEach(container => {
+    bindThreadInteractions(container);
   });
 }
 

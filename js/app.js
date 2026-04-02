@@ -1,7 +1,7 @@
 import { getProgress, setLessonComplete, resetCourse } from './store.js';
 import { renderLessonContent, applyHighlighting, bindThreadToggles } from './renderer.js';
 import { renderQuiz, renderConfigEditor, bindExerciseHandlers } from './exercises.js';
-import { initWidget, setContext, isConfigured, bindSectionAskButtons } from './ai-widget.js';
+import { initWidget, setContext, isConfigured, bindSectionAskButtons, bindThreadDeleteButtons } from './ai-widget.js';
 
 let appConfig = null;
 let courses = [];
@@ -190,9 +190,10 @@ function renderLesson(lessonId) {
   };
   bindExerciseHandlers(lessonId, lesson.exercises, onExerciseComplete);
 
-  // Set AI widget context and bind section ask buttons
+  // Set AI widget context and bind section ask/delete buttons
   setContext(currentCourse, module, lesson);
   bindSectionAskButtons(main);
+  bindThreadDeleteButtons(main);
 
   renderSidebar();
 }

@@ -453,6 +453,12 @@ body {
   background: rgba(61,89,161,0.08);
   border-radius: 0 6px 6px 0;
 }
+.embedded-thread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
 .embedded-thread-toggle {
   cursor: pointer;
   color: var(--text-muted);
@@ -460,8 +466,24 @@ body {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
 }
 .embedded-thread-toggle:hover { color: var(--text-primary); }
+.embedded-thread-delete {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  opacity: 0;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.embedded-thread:hover .embedded-thread-delete { opacity: 1; }
+.embedded-thread-delete:hover { color: var(--error); background: rgba(247,118,142,0.1); }
 .embedded-thread-toggle::before {
   content: '▶';
   font-size: 0.6rem;

@@ -43,6 +43,13 @@ export function saveThread(courseId, lessonId, thread) {
   setStore(courseId, store);
 }
 
+export function removeThread(courseId, lessonId, timestamp) {
+  const store = getStore(courseId);
+  if (!store.threads || !store.threads[lessonId]) return;
+  store.threads[lessonId] = store.threads[lessonId].filter(t => t.timestamp !== timestamp);
+  setStore(courseId, store);
+}
+
 export function resetCourse(courseId) {
   localStorage.removeItem(STORE_PREFIX + courseId);
 }
